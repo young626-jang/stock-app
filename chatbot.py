@@ -62,7 +62,20 @@ except (FileNotFoundError, KeyError):
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# [함수 정의] (기존 로직 유지)
+# [SIC 코드 기반 섹터 분류]
+# ==========================================
+# FDA 규제 대상 SIC 코드 (의약품, 의료기기, 바이오)
+BIO_SIC_CODES = {
+    2834,  # Pharmaceutical Preparations
+    2835,  # In Vitro and In Vivo Diagnostic Substances
+    2836,  # Biological Products, Except Diagnostic Substances
+    3842,  # Orthopedic, Prosthetic, and Surgical Appliances
+    3845,  # Electromedical and Electrotherapeutic Apparatus
+    3851,  # Ophthalmic Goods
+}
+
+# ==========================================
+# [함수 정의] (기존 로직 + SIC 개선)
 # ==========================================
 @st.cache_data
 def get_available_gemini_model():
@@ -78,9 +91,53 @@ def clean_company_name(name):
         name = re.sub(r'\b' + word + r'\b', '', name, flags=re.IGNORECASE)
     return name.strip()
 
+@st.cache_data(ttl=3600)
+def get_ticker_info_detailed(ticker, _client):
+    """
+    SIC 코드 기반 정확한 섹터 분류
+    BIO (FDA 규제) vs GENERAL (비규제)
+    """
+    try:
+        details = _client.get_ticker_details(ticker)
+        name = details.name
+
+        # SIC 코드 추출 (정수형)
+        sic_code = None
+        if hasattr(details, 'sic'):
+            try:
+                sic_code = int(details.sic) if details.sic else None
+            except (ValueError, TypeError):
+                sic_code = None
+
+        # SIC 코드 기반 1차 판단
+        if sic_code and sic_code in BIO_SIC_CODES:
+            is_bio = True
+            reason = f"SIC {sic_code}"
+        # 백업: 회사명 기반 2차 판단
+        else:
+            bio_keywords = ["PHARMA", "BIO", "DRUG", "MEDICAL", "SURGICAL", "THERAP", "BIOTECH"]
+            is_bio = any(k in name.upper() for k in bio_keywords)
+            reason = "Name Pattern" if is_bio else "Non-Bio"
+
+        return {
+            "name": name,
+            "sic_code": sic_code,
+            "is_bio": is_bio,
+            "reason": reason
+        }
+    except Exception:
+        return {
+            "name": ticker,
+            "sic_code": None,
+            "is_bio": False,
+            "reason": "Error"
+        }
+
 def get_company_name(ticker, client):
-    try: return client.get_ticker_details(ticker).name
-    except: return ticker
+    try:
+        return client.get_ticker_details(ticker).name
+    except:
+        return ticker
 
 @st.cache_data(ttl=3600)  # 1시간 캐시
 def get_fda_enforcements(company_name):
@@ -177,18 +234,32 @@ with col_btn:
     run_btn = st.button("분석 🚀", type="primary", use_container_width=True) 
 
 if run_btn:
-    with st.spinner("AI가 분석 중..."):
+    with st.spinner("섹터 분석 및 데이터 채굴 중..."):
         try:
             client = RESTClient(API_KEY)
-            company_name = get_company_name(ticker, client)
-            
+
+            # 1️⃣ SIC 코드 기반 정확한 섹터 분류
+            ticker_info = get_ticker_info_detailed(ticker, client)
+            company_name = ticker_info["name"]
+            sic_code = ticker_info["sic_code"]
+            is_bio = ticker_info["is_bio"]
+            classification_reason = ticker_info["reason"]
+
+            # 사용자에게 현재 모드 알려주기
+            if is_bio:
+                st.toast(f"🧬 BIO 섹터 감지 ({classification_reason})! FDA 데이터베이스 연결...", icon="💊")
+            else:
+                st.toast(f"💻 GENERAL 섹터 ({classification_reason}) - 뉴스 & 실적 분석...", icon="🏢")
+
+            # 2️⃣ 차트 데이터 수집
             end_dt = get_est_date()
             start_dt = end_dt - timedelta(days=14)
             aggs = list(client.list_aggs(ticker, 1, "minute", start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), limit=50000))
 
             if not aggs:
-                st.error("데이터 없음")
+                st.error(f"❌ '{ticker}' 데이터를 찾을 수 없습니다.")
             else:
+                # 3️⃣ 기술적 지표 계산
                 current_price = aggs[-1].close
                 total_vol = sum(a.volume for a in aggs)
                 total_pv = sum(((a.high+a.low+a.close)/3)*a.volume for a in aggs)
@@ -198,41 +269,138 @@ if run_btn:
                 support = max(price_vol, key=price_vol.get)
                 diff = ((current_price - vwap)/vwap)*100
 
-                st.session_state.analysis_data = {"ticker": ticker, "name": company_name, "price": current_price, "vwap": vwap}
+                # 4️⃣ 데이터 세션 저장
+                st.session_state.analysis_data = {
+                    "ticker": ticker,
+                    "name": company_name,
+                    "price": current_price,
+                    "is_bio": is_bio,
+                    "sic_code": sic_code
+                }
 
-                # 모바일용 메트릭 배치 (2열 + 1열)
+                # 5️⃣ 화면 표시 - 섹터 배지
+                badge_color = "#e6fffa" if is_bio else "#e6f7ff"
+                badge_text = "🧬 BIO/PHARMA" if is_bio else "💻 TECH/GENERAL"
+                sic_display = f" (SIC {sic_code})" if sic_code else " (No SIC)"
+                st.markdown(f"""
+                <div style='text-align:center; background-color:{badge_color}; padding:8px; border-radius:8px; margin-bottom:15px; font-size:0.9rem; color:#333; font-weight:bold;'>
+                    {badge_text}{sic_display}
+                </div>
+                """, unsafe_allow_html=True)
+
+                # 모바일용 메트릭 배치
                 m1, m2 = st.columns(2)
                 m1.metric("현재가", f"${current_price}")
                 m2.metric("세력평단", f"${vwap:.2f}", f"{diff:.1f}%")
-                st.metric("강력 지지선", f"${support}") # 지지선은 중요하니 크게
+                st.metric("강력 지지선", f"${support}")
 
-                sys_data = f"종목: {ticker}, 가격: {current_price}, VWAP: {vwap:.2f}, 지지선: {support}"
-                gemini_prompt = f"기술적 분석 요약해줘.\n{sys_data}"
+                # 6️⃣ AI 분석 (모드별 조건부 프롬프트)
+                sys_data = f"종목: {ticker}({company_name}), SIC: {sic_code if sic_code else 'N/A'}, 가격: {current_price}, VWAP: {vwap:.2f}, 지지선: {support}"
 
-                # 병렬 처리: FDA와 Gemini를 동시에 실행 (응답속도 33% 단축)
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                    fda_future = executor.submit(get_fda_enforcements, company_name)
-                    gemini_res = analyze_with_gemini(gemini_prompt)  # 이 시간에 FDA도 동시 실행
-                    fda_info = fda_future.result()
+                # BIO 모드: FDA 필수, GENERAL 모드: FDA 스킵
+                if is_bio:
+                    # 병렬 처리: FDA와 Gemini 동시 실행
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                        fda_future = executor.submit(get_fda_enforcements, company_name)
+                        gemini_res = analyze_with_gemini(f"생명공학 회사의 기술적 분석\n{sys_data}")
+                        fda_info = fda_future.result()
 
-                pplx_res = verify_with_perplexity(gemini_res, sys_data, fda_info)
+                    # BIO용 프롬프트
+                    pplx_prompt = f"""[BIO 섹터 분석]
+[종목 데이터]
+{sys_data}
+
+[FDA 규제 현황]
+{fda_info}
+
+[기술적 분석]
+{gemini_res}
+
+[분석 지시]
+1. FDA 리콜/제재가 실제 주가에 미칠 영향도 분석
+2. 최근 임상 결과, PDUFA 날짜, 파이프라인 이슈 검색 (24시간)
+3. 기술적 위치(VWAP, 지지선)와 결합하여 종합 판단
+4. 면책조항 금지
+
+[결과 양식]
+## 💊 FDA/임상 이슈
+(FDA 리콜 내역과 영향도)
+
+## 📰 바이오 뉴스 체크
+(최근 뉴스 요약)
+
+## 🎯 결론
+(매수🟢/관망🟡/매도🔴) - (한줄 이유)"""
+                else:
+                    # GENERAL 모드: FDA 제외
+                    gemini_res = analyze_with_gemini(f"기술주/성장주 기술적 분석\n{sys_data}")
+                    fda_info = "해당 없음 (Non-Bio Sector)"
+
+                    # GENERAL용 프롬프트
+                    pplx_prompt = f"""[일반/기술 섹터 분석]
+[종목 데이터]
+{sys_data}
+
+[기술적 분석]
+{gemini_res}
+
+[분석 지시]
+1. 최신 실적, CEO 발언, 제품 출시, 계약 공시 검색 (24시간)
+2. 거시 경제 영향 및 경쟁 구도 분석
+3. 기술적 위치(VWAP, 지지선)와 결합하여 판단
+4. 면책조항 금지
+
+[결과 양식]
+## 🏢 펀더멘탈/뉴스 이슈
+(실적, 뉴스, 공시 요약)
+
+## ⚠️ 리스크 체크
+(발견된 위험요소)
+
+## 🎯 결론
+(매수🟢/관망🟡/매도🔴) - (한줄 이유)"""
+
+                # Perplexity 분석 (모드별 다른 프롬프트)
+                url = "https://api.perplexity.ai/chat/completions"
+                headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
+                payload = {
+                    "model": "sonar",
+                    "messages": [
+                        {"role": "system", "content": f"당신은 {'바이오/제약 투자 전문가' if is_bio else '기술주/성장주 전문가'}입니다. 팩트 기반으로 직설적 답변. 면책조항 금지."},
+                        {"role": "user", "content": pplx_prompt}
+                    ],
+                    "temperature": 0.2
+                }
+
+                try:
+                    pplx_res = requests.post(url, json=payload, headers=headers, timeout=30).json()["choices"][0]["message"]["content"]
+                except Exception as e:
+                    pplx_res = f"❌ 분석 실패: {str(e)[:40]}"
                 
-                # 최종 신호 카드 (모바일 가독성 최적화)
+                # 최종 신호 카드
                 sig_text, bg_color, text_color = extract_signal(pplx_res)
                 st.markdown(f"""
-                <div style="background-color:{bg_color}; padding:15px; border-radius:12px; text-align:center; margin-bottom:15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                <div style="background-color:{bg_color}; padding:15px; border-radius:12px; text-align:center; margin:15px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
                     <h3 style="color:{text_color}; margin:0; font-size:1.5rem;">{sig_text}</h3>
                 </div>
                 """, unsafe_allow_html=True)
 
-                # 아코디언 (기본 닫음으로 스크롤 절약)
-                with st.expander("📊 상세 분석 결과 보기", expanded=False):
+                # 분석 결과 아코디언
+                with st.expander(f"📊 {'💊 BIO' if is_bio else '🏢 GENERAL'} 상세 분석 결과", expanded=False):
                     st.markdown(pplx_res)
-                
-                with st.expander("💊 FDA 리콜 내역", expanded=False):
-                    st.text(fda_info) # text로 해서 가독성 확보
 
-                st.session_state.chat_history.append({"role": "assistant", "content": f"[{ticker} 결과] {sig_text}\n{pplx_res}"})
+                # BIO 모드일 때만 FDA 아코디언 표시
+                if is_bio:
+                    with st.expander("💊 FDA 규제 데이터 원본", expanded=False):
+                        st.text(fda_info)
+                else:
+                    with st.expander("ℹ️ 섹터 분류 정보", expanded=False):
+                        st.info(f"**분류:** GENERAL (Non-Bio)\n**SIC 코드:** {sic_code if sic_code else 'N/A'}\n**판단 기준:** {classification_reason}")
+
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": f"[{ticker}/{('BIO' if is_bio else 'GENERAL')}] {sig_text}\n\n{pplx_res}"
+                })
 
         except Exception as e:
             st.error(f"오류: {e}")
@@ -251,25 +419,42 @@ if len(st.session_state.chat_history) > 2:
 for msg in recent_msgs:
     with st.chat_message(msg["role"]): st.write(msg["content"])
 
-if question := st.chat_input("질문 입력 (예: 악재 있어?)"):
+if question := st.chat_input("질문 입력 (예: 악재 있어?, 목표가는?)"):
     st.session_state.chat_history.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.write(question)
 
     with st.chat_message("assistant"):
-        with st.spinner("검색 중..."):
+        with st.spinner("분석 중..."):
             context = ""
-            if st.session_state.analysis_data:
-                analysis_data = st.session_state.analysis_data
-                context = f"[종목:{analysis_data['ticker']}]"
+            mode_hint = ""
 
-            prompt = f"데이터:{context}\n질문:{question}\n지시:최신뉴스기반,면책조항금지,짧게답변."
+            if st.session_state.analysis_data:
+                data = st.session_state.analysis_data
+                ticker = data["ticker"]
+                is_bio = data.get("is_bio", False)
+                context = f"[종목:{ticker}, 모드:{'BIO' if is_bio else 'GENERAL'}]"
+
+                # 모드별 힌트
+                mode_hint = "바이오 회사의 FDA/임상 이슈를 중심으로" if is_bio else "기술주의 실적/뉴스를 중심으로"
+
+            # 모드별 프롬프트
+            chat_prompt = f"""데이터:{context}
+질문:{question}
+
+지시:
+- {mode_hint} 답변
+- 최신 뉴스 검색 (24시간 우선)
+- 면책조항 금지
+- 짧고 명확하게 (3줄 이내)"""
+
             headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
             chat_payload = {
                 "model": "sonar",
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [{"role": "user", "content": chat_prompt}],
                 "temperature": 0.2
             }
+
             try:
                 response = requests.post("https://api.perplexity.ai/chat/completions", json=chat_payload, headers=headers, timeout=30).json()
                 answer = response["choices"][0]["message"]["content"]
