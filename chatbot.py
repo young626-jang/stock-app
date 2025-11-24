@@ -174,7 +174,18 @@ if user_input:
     # AI 응답 생성
     with st.spinner("🤖 AI가 생각 중입니다..."):
         try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            # 사용 가능한 모델 자동 선택
+            available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+
+            model_priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+            selected_model = "gemini-1.5-flash"  # 기본값
+
+            for model_name in model_priority:
+                if any(model_name in m for m in available_models):
+                    selected_model = model_name
+                    break
+
+            model = genai.GenerativeModel(selected_model)
 
             # 대화 히스토리를 프롬프트에 포함
             messages = f"{system_prompt}\n\n"
