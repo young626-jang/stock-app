@@ -393,6 +393,9 @@ if run_btn:
                 </div>
                 """, unsafe_allow_html=True)
 
+                # 5-1️⃣ 실적발표일 먼저 조회 (메트릭 표시 전에)
+                earnings_info = get_earnings_date_hybrid(ticker, company_name)
+
                 # 모바일용 메트릭 배치 (2x2 그리드)
                 m1, m2 = st.columns(2)
                 m1.metric("현재가", f"${current_price}")
@@ -415,13 +418,11 @@ if run_btn:
 
                 # BIO 모드: FDA 필수, GENERAL 모드: FDA 스킵
                 if is_bio:
-                    # 병렬 처리: FDA + 실적발표일 + Gemini 동시 실행
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    # 병렬 처리: FDA + Gemini (실적은 이미 조회함)
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                         fda_future = executor.submit(get_fda_enforcements, company_name)
-                        earnings_future = executor.submit(get_earnings_date_hybrid, ticker, company_name)
                         gemini_res = analyze_with_gemini(f"생명공학 회사의 기술적 분석\n{sys_data}")
                         fda_info = fda_future.result()
-                        earnings_info = earnings_future.result()
 
                     # BIO용 프롬프트 (실적 정보 포함)
                     earnings_context = ""
@@ -458,11 +459,8 @@ if run_btn:
 ## 🎯 결론
 (매수🟢/관망🟡/매도🔴) - (한줄 이유)"""
                 else:
-                    # GENERAL 모드: FDA 제외, 실적발표일 조회
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                        earnings_future = executor.submit(get_earnings_date_hybrid, ticker, company_name)
-                        gemini_res = analyze_with_gemini(f"기술주/성장주 기술적 분석\n{sys_data}")
-                        earnings_info = earnings_future.result()
+                    # GENERAL 모드: FDA 제외, Gemini만 사용
+                    gemini_res = analyze_with_gemini(f"기술주/성장주 기술적 분석\n{sys_data}")
                     fda_info = "해당 없음 (Non-Bio Sector)"
 
                     # GENERAL용 프롬프트 (실적 정보 포함)
