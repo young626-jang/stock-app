@@ -101,7 +101,7 @@ def verify_with_gpt(gemini_analysis, system_data):
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "llama-3.1-sonar-small-128k-online",
+            "model": "sonar",
             "messages": [
                 {"role": "system", "content": "당신은 리스크 관리 전문가이며, 객관적이고 냉철한 판단을 내립니다."},
                 {"role": "user", "content": verification_prompt}
