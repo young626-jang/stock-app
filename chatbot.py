@@ -5,6 +5,9 @@ from collections import defaultdict
 import google.generativeai as genai
 from PIL import Image
 import io
+import pytz
+import requests
+import json
 
 # ==========================================
 # [기본 설정] 페이지 제목 및 아이콘
@@ -22,13 +25,121 @@ try:
     # 내 컴퓨터의 .streamlit/secrets.toml 또는 웹 서버의 Secrets에서 가져옴
     API_KEY = st.secrets["POLYGON_API_KEY"]
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    PERPLEXITY_API_KEY = st.secrets["PERPLEXITY_API_KEY"]
 except (FileNotFoundError, KeyError) as e:
     st.error("🚨 API 키를 찾을 수 없습니다!")
-    st.warning("`.streamlit/secrets.toml` 파일에 POLYGON_API_KEY와 GEMINI_API_KEY를 추가해주세요.")
+    st.warning("`.streamlit/secrets.toml` 파일에 다음을 추가해주세요:")
+    st.write("""
+    - POLYGON_API_KEY
+    - GEMINI_API_KEY
+    - PERPLEXITY_API_KEY
+    """)
     st.stop()
 
 # Gemini API 초기화
 genai.configure(api_key=GEMINI_API_KEY)
+
+# ==========================================
+# [유틸리티 함수]
+# ==========================================
+@st.cache_data
+def get_available_model():
+    """사용 가능한 Gemini 모델을 캐싱하여 조회"""
+    try:
+        available = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+        model_priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+
+        for model_name in model_priority:
+            if any(model_name in m for m in available):
+                return model_name
+        return "gemini-1.5-flash"  # 기본값
+    except Exception as e:
+        st.error(f"모델 조회 실패: {e}")
+        return "gemini-1.5-flash"
+
+def get_est_date():
+    """미국 동부 표준시(EST) 기준 현재 시간 반환"""
+    est = pytz.timezone("America/New_York")
+    return datetime.now(est)
+
+def analyze_with_gemini(prompt):
+    """Gemini 1차 분석 - 빠른 기술적 분석"""
+    try:
+        selected_model = get_available_model()
+        model = genai.GenerativeModel(selected_model)
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"❌ Gemini 분석 오류: {str(e)}"
+
+def verify_with_gpt(gemini_analysis, system_data):
+    """Perplexity 2차 검증 - Gemini 의견 비판 및 최종 신호"""
+    try:
+        verification_prompt = f"""당신은 냉철한 헤지펀드 포트폴리오 매니저입니다.
+
+[분석 대상 종목 데이터]
+{system_data}
+
+[Gemini의 1차 분석 결과]
+{gemini_analysis}
+
+---
+
+[당신의 임무]
+1. **Gemini 분석 평가**: 위 분석에서 논리적 강점과 약점을 지적하세요.
+2. **리스크 체크**: 숨어있는 리스크나 반박 가능한 부분을 언급하세요.
+3. **최종 신호**: 아래 중 하나를 선택하여 한 문장으로 이유를 설명하세요.
+   - 🟢 **매수** (강력한 매수 신호)
+   - 🟡 **관망** (더 정보 필요)
+   - 🔴 **매도** (매도/회피 신호)
+
+답변은 명확하고 간결하게 한국어로 제공하세요."""
+
+        url = "https://api.perplexity.ai/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "llama-3.1-sonar-small-128k-online",
+            "messages": [
+                {"role": "system", "content": "당신은 리스크 관리 전문가이며, 객관적이고 냉철한 판단을 내립니다."},
+                {"role": "user", "content": verification_prompt}
+            ],
+            "temperature": 0.8,
+            "max_tokens": 1200
+        }
+
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"❌ Perplexity 검증 오류: {str(e)}"
+
+def extract_signal(gpt_response):
+    """GPT 응답에서 최종 신호 추출"""
+    response_lower = gpt_response.lower()
+
+    if "🟢" in gpt_response or "매수" in response_lower and "강" in response_lower:
+        return "🟢 매수", "green"
+    elif "🔴" in gpt_response or "매도" in response_lower or "회피" in response_lower:
+        return "🔴 매도", "red"
+    else:
+        return "🟡 관망", "orange"
+
+def hybrid_ai_analysis(user_prompt, system_data):
+    """하이브리드 방식: Gemini (1차) → GPT (2차) → 최종 신호"""
+    # 1단계: Gemini 1차 분석
+    gemini_result = analyze_with_gemini(user_prompt)
+
+    # 2단계: GPT 2차 검증 및 최종 신호
+    gpt_result = verify_with_gpt(gemini_result, system_data)
+
+    # 3단계: 최종 신호 추출
+    signal, signal_color = extract_signal(gpt_result)
+
+    return gemini_result, gpt_result, signal, signal_color
 
 # ==========================================
 # [메인 화면 구성]
@@ -53,9 +164,9 @@ if st.button("세력 의도 분석 시작 🔍", type="primary"):
         try:
             # 1. 클라이언트 연결
             client = RESTClient(API_KEY)
-            
-            # 2. 날짜 설정 (최근 14일)
-            end_date = datetime.now()
+
+            # 2. 날짜 설정 (최근 14일, EST 기준)
+            end_date = get_est_date().replace(hour=0, minute=0, second=0, microsecond=0)
             start_date = end_date - timedelta(days=14)
             
             str_start = start_date.strftime("%Y-%m-%d")
@@ -68,7 +179,15 @@ if st.button("세력 의도 분석 시작 🔍", type="primary"):
 
             # 4. 데이터 검증
             if not aggs:
-                st.error(f"❌ [{ticker}] 데이터를 찾을 수 없습니다. 티커를 확인해주세요.")
+                st.error(f"❌ [{ticker}] 데이터를 찾을 수 없습니다.")
+                st.info("다음을 확인해주세요:")
+                st.write("""
+                - **티커명**: 대문자로 입력했는지 확인 (예: NVDA, TSLA)
+                - **거래소**: 미국 거래소(NYSE, NASDAQ)에 상장된 종목인지 확인
+                - **휴장일**: 주말이나 미국 공휴일은 데이터가 없습니다
+                - **API 플랜**: Polygon API의 데이터 조회 제한을 확인하세요
+                """)
+
             else:
                 # ----------------------------------
                 # 5. 핵심 분석 로직 (VWAP & 지지선)
@@ -134,7 +253,17 @@ if st.button("세력 의도 분석 시작 🔍", type="primary"):
                     st.write(f"세력들도 이미 수익 구간입니다. 추격 매수는 자제하세요.")
 
         except Exception as e:
-            st.error(f"오류 발생: {e}")
+            error_msg = str(e).lower()
+            st.error("오류 발생!")
+
+            if "401" in error_msg or "unauthorized" in error_msg:
+                st.warning("🔑 **API 인증 오류**: Polygon API 키가 유효하지 않습니다. Secrets을 다시 확인하세요.")
+            elif "429" in error_msg or "rate limit" in error_msg:
+                st.warning("⏳ **API 한도 초과**: 너무 많은 요청이 발생했습니다. 잠시 후 다시 시도하세요.")
+            elif "404" in error_msg or "not found" in error_msg:
+                st.warning("❌ **데이터 없음**: 해당 종목의 데이터를 찾을 수 없습니다. 티커를 확인하세요.")
+            else:
+                st.info(f"기술 정보: {e}")
 
 # ==========================================
 # [AI 대화형 챗봇] - Gemini와의 실시간 대화
@@ -173,38 +302,87 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # AI 응답 생성
-    with st.spinner("🤖 AI가 생각 중입니다..."):
+    # AI 응답 생성 (하이브리드: Gemini 1차 → GPT 2차 검증 → 최종 신호)
+    with st.spinner("🤖 1단계: Gemini 분석 중..."):
         try:
-            # 사용 가능한 모델 자동 선택
-            available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-
-            model_priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
-            selected_model = "gemini-1.5-flash"  # 기본값
-
-            for model_name in model_priority:
-                if any(model_name in m for m in available_models):
-                    selected_model = model_name
-                    break
-
-            model = genai.GenerativeModel(selected_model)
-
             # 대화 히스토리를 프롬프트에 포함
             messages = f"{system_prompt}\n\n"
-            for msg in st.session_state.chat_history[:-1]:  # 마지막 사용자 메시지 제외 (이미 위에 있음)
+            for msg in st.session_state.chat_history[:-1]:
                 role = "사용자" if msg["role"] == "user" else "전문가"
                 messages += f"{role}: {msg['content']}\n\n"
             messages += f"사용자: {user_input}"
 
-            response = model.generate_content(messages)
-            ai_response = response.text
+            # 시스템 데이터 준비
+            if st.session_state.analysis_data:
+                data = st.session_state.analysis_data
+                system_data = f"""
+현재 분석 중인 종목: {data['ticker']}
+- 현재 주가: ${data['current_price']}
+- 세력 평단가(VWAP): ${data['vwap']:.2f}
+- 강력 지지선: ${data['top_support']}
+- 괴리율: {data['diff_per']:.2f}%
+- 총 거래량: {data['total_volume']}
+"""
+            else:
+                system_data = ""
 
-            # AI 응답 저장 및 표시
-            st.session_state.chat_history.append({"role": "assistant", "content": ai_response})
-            with st.chat_message("assistant"):
-                st.markdown(ai_response)
+            # 하이브리드 분석 실행
+            gemini_result, gpt_result, final_signal, signal_color = hybrid_ai_analysis(messages, system_data)
+
+            # ==========================================
+            # [결과 표시] 3단계 분석 과정
+            # ==========================================
+
+            # 1단계: Gemini 분석 결과
+            with st.expander("📊 1단계: Gemini 기술적 분석 (클릭하여 확인)", expanded=False):
+                st.markdown(gemini_result)
+
+            # 2단계: Perplexity 검증 결과
+            st.write("")  # 여백
+            with st.expander("🔍 2단계: Perplexity 검증 및 리스크 분석 (클릭하여 확인)", expanded=False):
+                st.markdown(gpt_result)
+
+            # 3단계: 최종 신호 (강조 표시)
+            st.divider()
+            st.subheader("🎯 최종 투자 신호")
+
+            # 신호를 큰 박스로 표시
+            if signal_color == "green":
+                st.success(f"### {final_signal}\n\n매수 기회 포착!")
+            elif signal_color == "red":
+                st.error(f"### {final_signal}\n\n주의 필요!")
+            else:
+                st.warning(f"### {final_signal}\n\n추가 정보 대기 중")
+
+            # 최종 응답 저장
+            combined_response = f"""
+**1단계: Gemini 기술적 분석**
+{gemini_result}
+
+---
+
+**2단계: Perplexity 검증 및 리스크 분석**
+{gpt_result}
+
+---
+
+**최종 신호: {final_signal}**
+"""
+            st.session_state.chat_history.append({"role": "assistant", "content": combined_response})
+
         except Exception as e:
-            st.error(f"AI 응답 생성 실패: {e}")
+            st.error("AI 분석 실패!")
+            error_msg = str(e).lower()
+            if "api" in error_msg or "gemini" in error_msg:
+                st.warning("🤖 **Gemini 오류**: Gemini API에 접속할 수 없습니다. 네트워크를 확인하세요.")
+            elif "perplexity" in error_msg:
+                st.warning("🟡 **Perplexity 오류**: Perplexity API에 접속할 수 없습니다. Secrets 설정을 확인하세요.")
+            elif "rate limit" in error_msg or "429" in error_msg:
+                st.warning("⏳ **API 한도 초과**: 너무 많은 요청이 발생했습니다. 1분 후 다시 시도하세요.")
+            elif "401" in error_msg or "unauthorized" in error_msg:
+                st.warning("🔑 **인증 오류**: API 키가 유효하지 않습니다. Secrets을 확인하세요.")
+            else:
+                st.info(f"기술 정보: {e}")
 else:
     if not st.session_state.analysis_data:
         st.info("📊 먼저 종목을 분석해주세요!")
@@ -237,16 +415,8 @@ with tab1:
         if st.button("🔍 차트 분석 시작", key="analyze_chart"):
             with st.spinner("차트를 분석 중입니다..."):
                 try:
-                    # 사용 가능한 모델 선택
-                    available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-                    model_priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
-                    selected_model = "gemini-1.5-flash"
-
-                    for model_name in model_priority:
-                        if any(model_name in m for m in available_models):
-                            selected_model = model_name
-                            break
-
+                    # 사용 가능한 모델 자동 선택 (캐싱됨)
+                    selected_model = get_available_model()
                     model = genai.GenerativeModel(selected_model)
 
                     # 이미지를 바이너리로 변환
@@ -271,7 +441,14 @@ with tab1:
                     st.markdown(analysis_result)
 
                 except Exception as e:
-                    st.error(f"차트 분석 실패: {e}")
+                    st.error("차트 분석 실패!")
+                    error_msg = str(e).lower()
+                    if "image" in error_msg:
+                        st.warning("🖼️ **이미지 오류**: 지원하지 않는 이미지 형식입니다. PNG, JPG, GIF를 사용하세요.")
+                    elif "api" in error_msg or "gemini" in error_msg:
+                        st.warning("🤖 **AI 오류**: Gemini API에 접속할 수 없습니다. 네트워크를 확인하세요.")
+                    else:
+                        st.info(f"기술 정보: {e}")
 
 # ==========================================
 # [탭 2] 뉴스 기반 분석
@@ -297,16 +474,8 @@ with tab2:
         else:
             with st.spinner("뉴스를 분석 중입니다..."):
                 try:
-                    # 사용 가능한 모델 선택
-                    available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-                    model_priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
-                    selected_model = "gemini-1.5-flash"
-
-                    for model_name in model_priority:
-                        if any(model_name in m for m in available_models):
-                            selected_model = model_name
-                            break
-
+                    # 사용 가능한 모델 자동 선택 (캐싱됨)
+                    selected_model = get_available_model()
                     model = genai.GenerativeModel(selected_model)
 
                     # 뉴스 분석 프롬프트
@@ -335,4 +504,11 @@ with tab2:
                     st.markdown(news_analysis)
 
                 except Exception as e:
-                    st.error(f"뉴스 분석 실패: {e}")
+                    st.error("뉴스 분석 실패!")
+                    error_msg = str(e).lower()
+                    if "api" in error_msg or "gemini" in error_msg:
+                        st.warning("🤖 **AI 오류**: Gemini API에 접속할 수 없습니다. 네트워크를 확인하세요.")
+                    elif "rate limit" in error_msg:
+                        st.warning("⏳ **API 한도 초과**: 너무 많은 요청이 발생했습니다. 잠시 후 다시 시도하세요.")
+                    else:
+                        st.info(f"기술 정보: {e}")
