@@ -174,7 +174,7 @@ if user_input:
     # AI 응답 생성
     with st.spinner("🤖 AI가 생각 중입니다..."):
         try:
-            model = genai.GenerativeModel("gemini-pro")
+            model = genai.GenerativeModel("gemini-1.5-flash")
 
             # 대화 히스토리를 프롬프트에 포함
             messages = f"{system_prompt}\n\n"
