@@ -7,6 +7,7 @@ import pytz
 import requests
 import re
 import concurrent.futures
+import yfinance as yf
 
 # ==========================================
 # [1] 모바일 최적화 설정 (Wide 모드 + CSS)
@@ -43,6 +44,16 @@ st.markdown("""
         padding: 10px;
         border-radius: 10px;
         text-align: center;
+    }
+    /* D-Day 경고 배지 */
+    .d-day-badge-warning {
+        background-color: #ff4b4b;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 5px;
+        font-weight: bold;
+        font-size: 0.8em;
+        margin-left: 5px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -163,6 +174,100 @@ def get_fda_enforcements(company_name):
         return "🔌 FDA 연결 실패 (인터넷 확인)"
     except Exception as e:
         return f"❌ FDA 오류: {str(e)[:30]}"
+
+@st.cache_data(ttl=86400)  # 24시간 캐시 (실적일은 자주 바뀌지 않음)
+def get_earnings_date_hybrid(ticker, company_name):
+    """
+    하이브리드 실적발표일 조회:
+    1. yfinance (공식 데이터, 빠름)
+    2. Perplexity 폴백 (웹검색)
+
+    반환: {"date": "YYYY-MM-DD", "d_day": "D-52", "days_left": 52}
+    """
+    # 방법 1: yfinance (공식 데이터)
+    try:
+        stock = yf.Ticker(ticker)
+        calendar = stock.calendar
+
+        earnings_date = None
+        if isinstance(calendar, dict) and 'Earnings Date' in calendar:
+            earnings_date = calendar['Earnings Date']
+            if isinstance(earnings_date, (list, tuple)) and len(earnings_date) > 0:
+                earnings_date = earnings_date[0]
+        elif hasattr(calendar, 'iloc'):  # DataFrame
+            earnings_date = calendar.iloc[0, 0]
+
+        if earnings_date:
+            today = datetime.now().date()
+            # 다양한 날짜 형식 처리
+            if hasattr(earnings_date, 'date'):
+                e_date = earnings_date.date()
+            elif isinstance(earnings_date, datetime):
+                e_date = earnings_date.date()
+            else:
+                e_date = earnings_date
+            days_left = (e_date - today).days
+
+            if days_left == 0:
+                d_str = "D-Day (오늘)"
+            elif days_left > 0:
+                d_str = f"D-{days_left}"
+            else:
+                d_str = "발표 완료"
+
+            return {
+                "date": e_date.strftime("%Y-%m-%d"),
+                "d_day": d_str,
+                "days_left": days_left,
+                "source": "yfinance"
+            }
+    except Exception as yf_error:
+        pass  # Perplexity 폴백으로 진행
+
+    # 방법 2: Perplexity 폴백 (웹검색)
+    try:
+        prompt = f"{ticker}({company_name})의 다음 분기 실적발표 예정일은 언제입니까? 날짜만 정확히 답변해주세요. (예: 2025-01-28)"
+        url = "https://api.perplexity.ai/chat/completions"
+        headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": "sonar",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2
+        }
+
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        response.raise_for_status()
+        result = response.json()["choices"][0]["message"]["content"]
+
+        if len(result.strip()) >= 10:
+            earnings_date_str = result.strip()[:10]  # YYYY-MM-DD 형식
+            today = datetime.now().date()
+            e_date = datetime.strptime(earnings_date_str, "%Y-%m-%d").date()
+            days_left = (e_date - today).days
+
+            if days_left == 0:
+                d_str = "D-Day (오늘)"
+            elif days_left > 0:
+                d_str = f"D-{days_left}"
+            else:
+                d_str = "발표 완료"
+
+            return {
+                "date": earnings_date_str,
+                "d_day": d_str,
+                "days_left": days_left,
+                "source": "Perplexity"
+            }
+    except:
+        pass
+
+    # 데이터 없음
+    return {
+        "date": "미정",
+        "d_day": "-",
+        "days_left": 999,
+        "source": "N/A"
+    }
 
 def analyze_with_gemini(prompt):
     try:
@@ -288,27 +393,47 @@ if run_btn:
                 </div>
                 """, unsafe_allow_html=True)
 
-                # 모바일용 메트릭 배치
+                # 모바일용 메트릭 배치 (2x2 그리드)
                 m1, m2 = st.columns(2)
                 m1.metric("현재가", f"${current_price}")
                 m2.metric("세력평단", f"${vwap:.2f}", f"{diff:.1f}%")
-                st.metric("강력 지지선", f"${support}")
+
+                m3, m4 = st.columns(2)
+                m3.metric("강력 지지선", f"${support}")
+
+                # 실적 발표일 메트릭 (D-Day에 따른 조건부 표시)
+                if earnings_info['days_left'] <= 7 and earnings_info['days_left'] >= 0:
+                    m4.metric("다음 실적발표", f"{earnings_info['date']}", earnings_info['d_day'], delta_color="inverse")
+                else:
+                    m4.metric("다음 실적발표", f"{earnings_info['date']}", earnings_info['d_day'])
+
+                # 실적발표일 경고 배지 및 상세 표시
+                earnings_placeholder = st.empty()
 
                 # 6️⃣ AI 분석 (모드별 조건부 프롬프트)
                 sys_data = f"종목: {ticker}({company_name}), SIC: {sic_code if sic_code else 'N/A'}, 가격: {current_price}, VWAP: {vwap:.2f}, 지지선: {support}"
 
                 # BIO 모드: FDA 필수, GENERAL 모드: FDA 스킵
                 if is_bio:
-                    # 병렬 처리: FDA와 Gemini 동시 실행
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    # 병렬 처리: FDA + 실적발표일 + Gemini 동시 실행
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                         fda_future = executor.submit(get_fda_enforcements, company_name)
+                        earnings_future = executor.submit(get_earnings_date_hybrid, ticker, company_name)
                         gemini_res = analyze_with_gemini(f"생명공학 회사의 기술적 분석\n{sys_data}")
                         fda_info = fda_future.result()
+                        earnings_info = earnings_future.result()
 
-                    # BIO용 프롬프트
+                    # BIO용 프롬프트 (실적 정보 포함)
+                    earnings_context = ""
+                    if earnings_info['days_left'] <= 7 and earnings_info['days_left'] >= 0:
+                        earnings_context = f"\n🚨 [긴급] 실적 발표가 {earnings_info['d_day']} 남았습니다! 변동성 리스크와 조정 가능성을 강조하세요."
+
                     pplx_prompt = f"""[BIO 섹터 분석]
 [종목 데이터]
 {sys_data}
+
+[실적 발표 일정]
+다음 발표: {earnings_info['date']} ({earnings_info['d_day']}) {earnings_context}
 
 [FDA 규제 현황]
 {fda_info}
@@ -317,14 +442,15 @@ if run_btn:
 {gemini_res}
 
 [분석 지시]
-1. FDA 리콜/제재가 실제 주가에 미칠 영향도 분석
+1. FDA 리콜/제재와 실적 일정을 함께 고려한 리스크 분석
 2. 최근 임상 결과, PDUFA 날짜, 파이프라인 이슈 검색 (24시간)
-3. 기술적 위치(VWAP, 지지선)와 결합하여 종합 판단
-4. 면책조항 금지
+3. 실적 발표가 가까우면 변동성 주의 권고 추가
+4. 기술적 위치(VWAP, 지지선)와 결합하여 종합 판단
+5. 면책조항 금지
 
 [결과 양식]
-## 💊 FDA/임상 이슈
-(FDA 리콜 내역과 영향도)
+## 💊 FDA/임상/실적
+(FDA 이슈와 실적 영향도)
 
 ## 📰 바이오 뉴스 체크
 (최근 뉴스 요약)
@@ -332,27 +458,38 @@ if run_btn:
 ## 🎯 결론
 (매수🟢/관망🟡/매도🔴) - (한줄 이유)"""
                 else:
-                    # GENERAL 모드: FDA 제외
-                    gemini_res = analyze_with_gemini(f"기술주/성장주 기술적 분석\n{sys_data}")
+                    # GENERAL 모드: FDA 제외, 실적발표일 조회
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                        earnings_future = executor.submit(get_earnings_date_hybrid, ticker, company_name)
+                        gemini_res = analyze_with_gemini(f"기술주/성장주 기술적 분석\n{sys_data}")
+                        earnings_info = earnings_future.result()
                     fda_info = "해당 없음 (Non-Bio Sector)"
 
-                    # GENERAL용 프롬프트
+                    # GENERAL용 프롬프트 (실적 정보 포함)
+                    earnings_context = ""
+                    if earnings_info['days_left'] <= 7 and earnings_info['days_left'] >= 0:
+                        earnings_context = f"\n🚨 [긴급] 실적 발표가 {earnings_info['d_day']} 남았습니다! 변동성 리스크와 조정 가능성을 강조하세요."
+
                     pplx_prompt = f"""[일반/기술 섹터 분석]
 [종목 데이터]
 {sys_data}
+
+[실적 발표 일정]
+다음 발표: {earnings_info['date']} ({earnings_info['d_day']}) {earnings_context}
 
 [기술적 분석]
 {gemini_res}
 
 [분석 지시]
-1. 최신 실적, CEO 발언, 제품 출시, 계약 공시 검색 (24시간)
-2. 거시 경제 영향 및 경쟁 구도 분석
-3. 기술적 위치(VWAP, 지지선)와 결합하여 판단
-4. 면책조항 금지
+1. 실적 발표 일정에 따른 변동성 리스크 분석
+2. 최신 실적, CEO 발언, 제품 출시, 계약 공시 검색 (24시간)
+3. 거시 경제 영향 및 경쟁 구도 분석
+4. 기술적 위치(VWAP, 지지선)와 결합하여 판단
+5. 면책조항 금지
 
 [결과 양식]
-## 🏢 펀더멘탈/뉴스 이슈
-(실적, 뉴스, 공시 요약)
+## 🏢 실적/뉴스 이슈
+(실적 일정, 뉴스, 공시 요약)
 
 ## ⚠️ 리스크 체크
 (발견된 위험요소)
@@ -376,7 +513,33 @@ if run_btn:
                     pplx_res = requests.post(url, json=payload, headers=headers, timeout=30).json()["choices"][0]["message"]["content"]
                 except Exception as e:
                     pplx_res = f"❌ 분석 실패: {str(e)[:40]}"
-                
+
+                # 📅 실적발표일 상세 배지 표시 (D-day 계산 + 조건부 강조)
+                if earnings_info['days_left'] < 999:  # 데이터 있음
+                    days_until = earnings_info['days_left']
+
+                    # 조건부 배경색 및 아이콘
+                    if days_until <= 7 and days_until >= 0:
+                        emoji = "🔴"  # 빨강: 임박한 날짜 (D-7 이하)
+                        bg = "#ffe6e6"
+                        border = "#ff4444"
+                    elif days_until < 0:
+                        emoji = "⏰"  # 회색: 이미 지난 날짜
+                        bg = "#f0f0f0"
+                        border = "#999999"
+                    else:
+                        emoji = "🟢"  # 초록: 여유 있음
+                        bg = "#e6ffe6"
+                        border = "#44ff44"
+
+                    earnings_display = f"{emoji} 다음 실적발표: {earnings_info['date']} ({earnings_info['d_day']}) [{earnings_info['source']}]"
+
+                    earnings_placeholder.markdown(f"""
+                    <div style='background-color:{bg}; border-left: 4px solid {border}; padding: 12px; border-radius: 8px; margin: 10px 0; font-weight: bold;'>
+                        {earnings_display}
+                    </div>
+                    """, unsafe_allow_html=True)
+
                 # 최종 신호 카드
                 sig_text, bg_color, text_color = extract_signal(pplx_res)
                 st.markdown(f"""
