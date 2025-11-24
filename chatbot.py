@@ -7,6 +7,7 @@ import pytz
 import requests
 import re
 import yfinance as yf
+import time  # 👈 번역 시 API 충돌 방지용 대기시간 추가
 
 # ==========================================
 # [1] UI 및 모바일 최적화 설정
@@ -145,21 +146,45 @@ def get_fda_data(company_name):
             if results:
                 summary = []
                 for r in results:
-                    summary.append(f"• {r.get('report_date','-')} ({r.get('status','-')})\n  └ {r.get('reason_for_recall','')[:150]}...")
+                    # 너무 길면 자르기 (번역 비용 절감)
+                    reason = r.get('reason_for_recall','')[:200]
+                    summary.append(f"• {r.get('report_date','-')} ({r.get('status','-')})\n  └ {reason}...")
                 return "\n".join(summary)
             return "✅ 최근 리콜/제재 이력 없음"
         return "ℹ️ FDA 데이터 없음"
     except: return "❌ FDA 서버 연결 실패"
 
 def translate_to_korean(text):
-    """Gemini를 이용한 한글 번역 함수"""
-    if "없음" in text or "실패" in text: return text
+    """Gemini를 이용한 한글 번역 (강력 모드)"""
+    if not text or "없음" in text or "실패" in text: 
+        return text
+    
+    # 0.5초 대기 (이전 API 호출과 겹치지 않게)
+    time.sleep(0.5)
+    
     try:
         model = genai.GenerativeModel("gemini-1.5-flash")
-        prompt = f"다음 FDA 리콜 내역을 한국어로 자연스럽게 번역해줘. 의학 용어는 이해하기 쉽게 풀어서 써줘:\n\n{text}"
+        
+        # 프롬프트를 구체적으로 변경 (포맷 유지 + 설명 번역)
+        prompt = f"""
+        You are a professional medical translator.
+        Translate the following FDA recall reasons into Korean.
+        
+        [Rules]
+        1. Keep the Date (e.g., 20231115) and Status (e.g., Terminated, Ongoing) exactly as is.
+        2. Translate ONLY the description part after the symbol '└'.
+        3. Use natural Korean suitable for investors.
+        4. Keep the bullet points (•) format.
+
+        [Input Text]
+        {text}
+        """
+        
         response = model.generate_content(prompt)
         return response.text
-    except: return text
+    except Exception as e:
+        # 번역 실패 시 에러 메시지 표시
+        return f"⚠️ 번역 시스템 응답 지연 (영어 원본 표시):\n{text}"
 
 def analyze_with_gemini(prompt):
     try:
@@ -249,8 +274,9 @@ if run_btn:
                 support = max(price_vol, key=price_vol.get)
                 diff = ((current_price - vwap)/vwap)*100
 
-                # FDA 데이터 수집 및 번역
+                # FDA 데이터 수집 및 번역 (바이오 모드일 때만)
                 fda_info_eng = get_fda_data(company_name) if mode == "BIO" else "N/A"
+                # 한글 번역 수행
                 fda_info_kr = translate_to_korean(fda_info_eng) if mode == "BIO" and "없음" not in fda_info_eng else fda_info_eng
 
                 st.session_state.analysis_data = {
@@ -279,7 +305,8 @@ if run_btn:
                 sys_data = f"종목: {ticker}, 가격: {current_price}, VWAP: {vwap:.2f}, 지지선: {support}"
                 gemini_res = analyze_with_gemini(f"기술적 분석 요약:\n{sys_data}")
                 sys_data_full = f"{sys_data}\n[Gemini 의견]: {gemini_res}"
-                ai_report = run_hybrid_analysis(mode, sys_data_full, fda_info_eng, earnings) # 분석엔 영어 데이터 사용 (정확도)
+                # 분석에는 영어 데이터를 넘깁니다 (정확도)
+                ai_report = run_hybrid_analysis(mode, sys_data_full, fda_info_eng, earnings)
 
                 sig_text, bg, txt = extract_signal(ai_report)
                 st.markdown(f"""
@@ -293,7 +320,8 @@ if run_btn:
                 
                 if mode == "BIO":
                     with st.expander("💊 FDA 리콜/제재 데이터 (한글 번역됨)", expanded=False):
-                        st.markdown(fda_info_kr) # 번역된 한글 데이터 표시
+                        # 여기에 번역된 한글 데이터를 표시
+                        st.markdown(fda_info_kr)
 
                 st.session_state.chat_history.append({"role": "assistant", "content": f"**[{ticker}] 분석결과**\n{sig_text}\n\n{ai_report}"})
 
