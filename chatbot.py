@@ -6,365 +6,222 @@ import google.generativeai as genai
 import pytz
 import requests
 import re
-import concurrent.futures
-import yfinance as yf
+import yfinance as yf # 👈 실적 발표일 조회를 위해 추가
 
 # ==========================================
-# [1] 모바일 최적화 설정 (Wide 모드 + CSS)
+# [1] UI 설정
 # ==========================================
 st.set_page_config(
-    page_title="세력 탐지기 Pro",
-    page_icon="🧬",
-    layout="wide",  # 모바일 좌우 여백 제거
+    page_title="세력 탐지기 Ultimate",
+    page_icon="📡",
+    layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# 모바일용 커스텀 CSS 주입
 st.markdown("""
     <style>
-    /* 상단 헤더 숨기기 및 여백 최소화 */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
-    .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 5rem !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
-    }
-    /* 버튼 모바일 최적화 */
-    .stButton > button {
-        width: 100%;
-        border-radius: 12px;
-        height: 3em;
-        font-weight: bold;
-    }
-    /* 메트릭 박스 디자인 */
-    div[data-testid="stMetric"] {
-        background-color: #f0f2f6;
-        padding: 10px;
-        border-radius: 10px;
-        text-align: center;
-    }
-    /* D-Day 경고 배지 */
-    .d-day-badge-warning {
-        background-color: #ff4b4b;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 5px;
-        font-weight: bold;
-        font-size: 0.8em;
-        margin-left: 5px;
+    .block-container {padding: 1rem 1rem 5rem 1rem !important;}
+    .stButton > button {width: 100%; border-radius: 12px; height: 3em; font-weight: bold;}
+    div[data-testid="stMetric"] {background-color: #f0f2f6; padding: 10px; border-radius: 10px; text-align: center;}
+    /* D-Day 뱃지 스타일 */
+    .d-day-badge {
+        background-color: #ff4b4b; color: white; padding: 2px 8px; border-radius: 5px; font-weight: bold; font-size: 0.8em;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# [보안 설정] API 키 로드
+# [2] API 키 로드
 # ==========================================
 try:
     API_KEY = st.secrets["POLYGON_API_KEY"]
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     PERPLEXITY_API_KEY = st.secrets["PERPLEXITY_API_KEY"]
     FDA_API_KEY = st.secrets["FDA_API_KEY"]
-except (FileNotFoundError, KeyError):
-    st.error("🚨 API 키 설정 필요")
+except:
+    st.error("🚨 API 키 설정 필요 (.streamlit/secrets.toml)")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# [SIC 코드 기반 섹터 분류]
-# ==========================================
-# FDA 규제 대상 SIC 코드 (의약품, 의료기기, 바이오)
-BIO_SIC_CODES = {
-    2834,  # Pharmaceutical Preparations
-    2835,  # In Vitro and In Vivo Diagnostic Substances
-    2836,  # Biological Products, Except Diagnostic Substances
-    3842,  # Orthopedic, Prosthetic, and Surgical Appliances
-    3845,  # Electromedical and Electrotherapeutic Apparatus
-    3851,  # Ophthalmic Goods
-}
-
-# ==========================================
-# [함수 정의] (기존 로직 + SIC 개선)
+# [3] 스마트 함수들
 # ==========================================
 @st.cache_data
-def get_available_gemini_model():
-    return "gemini-1.5-flash"
-
-def get_est_date():
-    return datetime.now(pytz.timezone("America/New_York"))
-
-def clean_company_name(name):
-    name = re.sub(r'[,.]', '', name)
-    remove_words = ['Inc', 'Corp', 'Corporation', 'Ltd', 'PLC', 'Group', 'Holdings']
-    for word in remove_words:
-        name = re.sub(r'\b' + word + r'\b', '', name, flags=re.IGNORECASE)
-    return name.strip()
-
-@st.cache_data(ttl=3600)
-def get_ticker_info_detailed(ticker, _client):
-    """
-    SIC 코드 기반 정확한 섹터 분류
-    BIO (FDA 규제) vs GENERAL (비규제)
-    """
-    try:
-        details = _client.get_ticker_details(ticker)
-        name = details.name
-
-        # SIC 코드 추출 (정수형)
-        sic_code = None
-        if hasattr(details, 'sic'):
-            try:
-                sic_code = int(details.sic) if details.sic else None
-            except (ValueError, TypeError):
-                sic_code = None
-
-        # SIC 코드 기반 1차 판단
-        if sic_code and sic_code in BIO_SIC_CODES:
-            is_bio = True
-            reason = f"SIC {sic_code}"
-        # 백업: 회사명 기반 2차 판단
-        else:
-            bio_keywords = ["PHARMA", "BIO", "DRUG", "MEDICAL", "SURGICAL", "THERAP", "BIOTECH"]
-            is_bio = any(k in name.upper() for k in bio_keywords)
-            reason = "Name Pattern" if is_bio else "Non-Bio"
-
-        return {
-            "name": name,
-            "sic_code": sic_code,
-            "is_bio": is_bio,
-            "reason": reason
-        }
-    except Exception:
-        return {
-            "name": ticker,
-            "sic_code": None,
-            "is_bio": False,
-            "reason": "Error"
-        }
-
-def get_company_name(ticker, client):
-    try:
-        return client.get_ticker_details(ticker).name
-    except:
-        return ticker
-
-@st.cache_data(ttl=3600)  # 1시간 캐시
-def get_fda_enforcements(company_name):
-    clean_name = clean_company_name(company_name)
-    search_query = clean_name.replace(" ", "+")
-    url = f"https://api.fda.gov/drug/enforcement.json?api_key={FDA_API_KEY}&search=openfda.manufacturer_name:{search_query}&limit=3&sort=report_date:desc"
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        results = response.json().get('results', [])
-        if results:
-            summary = []
-            for res in results:
-                date = res.get('report_date', '-')
-                status = res.get('status', '-')
-                reason = res.get('reason_for_recall', '')[:60]
-                summary.append(f"• {date} ({status})\n  └ {reason}...")
-            return "\n".join(summary)
-        return "✅ 최근 리콜 이력 없음"
-    except requests.Timeout:
-        return "⏱️ FDA 타임아웃 (네트워크 느림)"
-    except requests.ConnectionError:
-        return "🔌 FDA 연결 실패 (인터넷 확인)"
-    except Exception as e:
-        return f"❌ FDA 오류: {str(e)[:30]}"
-
-@st.cache_data(ttl=86400)  # 24시간 캐시 (실적일은 자주 바뀌지 않음)
-def get_earnings_date_hybrid(ticker, company_name):
-    """
-    하이브리드 실적발표일 조회:
-    1. yfinance (공식 데이터, 빠름)
-    2. Perplexity 폴백 (웹검색)
-
-    반환: {"date": "YYYY-MM-DD", "d_day": "D-52", "days_left": 52}
-    """
-    # 방법 1: yfinance (공식 데이터)
+def get_earnings_info(ticker):
+    """Yahoo Finance에서 다음 실적 발표일 조회 및 D-Day 계산"""
     try:
         stock = yf.Ticker(ticker)
+        # 캘린더 데이터 가져오기
         calendar = stock.calendar
-
+        
         earnings_date = None
+        # 데이터 구조가 버전에 따라 다를 수 있어 처리
         if isinstance(calendar, dict) and 'Earnings Date' in calendar:
-            earnings_date = calendar['Earnings Date']
-            if isinstance(earnings_date, (list, tuple)) and len(earnings_date) > 0:
-                earnings_date = earnings_date[0]
-        elif hasattr(calendar, 'iloc'):  # DataFrame
-            earnings_date = calendar.iloc[0, 0]
-
+             earnings_date = calendar['Earnings Date'][0]
+        elif hasattr(calendar, 'iloc'): # DataFrame인 경우
+             earnings_date = calendar.iloc[0][0]
+        
         if earnings_date:
             today = datetime.now().date()
-            # 다양한 날짜 형식 처리
-            if hasattr(earnings_date, 'date'):
-                e_date = earnings_date.date()
-            elif isinstance(earnings_date, datetime):
-                e_date = earnings_date.date()
-            else:
-                e_date = earnings_date
+            e_date = earnings_date.date()
             days_left = (e_date - today).days
-
-            if days_left == 0:
-                d_str = "D-Day (오늘)"
-            elif days_left > 0:
-                d_str = f"D-{days_left}"
-            else:
-                d_str = "발표 완료"
-
+            
+            # D-Day 문자열 포맷팅
+            if days_left == 0: d_str = "D-Day (오늘)"
+            elif days_left > 0: d_str = f"D-{days_left}"
+            else: d_str = "발표 완료"
+            
             return {
                 "date": e_date.strftime("%Y-%m-%d"),
                 "d_day": d_str,
-                "days_left": days_left,
-                "source": "yfinance"
+                "days_left": days_left
             }
-    except Exception as yf_error:
-        pass  # Perplexity 폴백으로 진행
-
-    # 방법 2: Perplexity 폴백 (웹검색)
-    try:
-        prompt = f"{ticker}({company_name})의 다음 분기 실적발표 예정일은 언제입니까? 날짜만 정확히 답변해주세요. (예: 2025-01-28)"
-        url = "https://api.perplexity.ai/chat/completions"
-        headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": "sonar",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2
-        }
-
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        response.raise_for_status()
-        result = response.json()["choices"][0]["message"]["content"]
-
-        if len(result.strip()) >= 10:
-            earnings_date_str = result.strip()[:10]  # YYYY-MM-DD 형식
-            today = datetime.now().date()
-            e_date = datetime.strptime(earnings_date_str, "%Y-%m-%d").date()
-            days_left = (e_date - today).days
-
-            if days_left == 0:
-                d_str = "D-Day (오늘)"
-            elif days_left > 0:
-                d_str = f"D-{days_left}"
-            else:
-                d_str = "발표 완료"
-
-            return {
-                "date": earnings_date_str,
-                "d_day": d_str,
-                "days_left": days_left,
-                "source": "Perplexity"
-            }
+        return {"date": "미정", "d_day": "-", "days_left": 999}
     except:
-        pass
+        return {"date": "정보 없음", "d_day": "-", "days_left": 999}
 
-    # 데이터 없음
-    return {
-        "date": "미정",
-        "d_day": "-",
-        "days_left": 999,
-        "source": "N/A"
-    }
-
-def analyze_with_gemini(prompt):
+@st.cache_data
+def get_ticker_info(ticker, _client):
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        return model.generate_content(prompt).text
-    except: return "분석 불가"
+        details = _client.get_ticker_details(ticker)
+        name = details.name
+        industry = getattr(details, "sic_description", "").upper()
+        bio_keywords = ["PHARMA", "BIO", "DRUG", "MEDICAL", "SURGICAL", "LIFE", "HEALTH", "THERAP"]
+        is_bio = any(k in industry for k in bio_keywords) or any(k in name.upper() for k in bio_keywords)
+        return {"name": name, "industry": industry if industry else "Unknown", "is_bio": is_bio}
+    except:
+        return {"name": ticker, "industry": "Unknown", "is_bio": False}
 
-def verify_with_perplexity(gemini_analysis, system_data, fda_data):
-    prompt = f"""[데이터]
-{system_data}
-[FDA]
-{fda_data}
-[Gemini]
-{gemini_analysis}
+def get_clean_name(name):
+    name = re.sub(r'[,.]', '', name)
+    remove = ['Inc', 'Corp', 'Corporation', 'Ltd', 'PLC', 'Group', 'Holdings', 'Therapeutics', 'Pharma']
+    for word in remove:
+        name = re.sub(r'\b' + word + r'\b', '', name, flags=re.IGNORECASE)
+    return name.strip()
 
-[지시]
-1. FDA 리콜 내역이 악재인지 확인.
-2. 24시간 내 최신 뉴스 검색.
-3. 면책조항 절대 금지.
-4. 아래 양식으로 답변.
+def get_fda_data(company_name):
+    clean_name = get_clean_name(company_name)
+    query = clean_name.replace(" ", "+")
+    url = f"https://api.fda.gov/drug/enforcement.json?api_key={FDA_API_KEY}&search=openfda.manufacturer_name:{query}&limit=3&sort=report_date:desc"
+    try:
+        res = requests.get(url, timeout=3)
+        if res.status_code == 200:
+            results = res.json().get('results', [])
+            if results:
+                summary = []
+                for r in results:
+                    summary.append(f"• {r.get('report_date','-')} ({r.get('status','-')})\n  └ {r.get('reason_for_recall','')[:60]}...")
+                return "\n".join(summary)
+            return "✅ 최근 리콜 없음"
+        return "ℹ️ FDA 데이터 없음"
+    except: return "❌ FDA 연결 실패"
 
-[양식]
-## 💊 FDA/임상
-(내용)
-## 📰 뉴스 팩트체크
-(내용)
-## 🎯 결론
-(매수🟢/관망🟡/매도🔴) - (한줄 이유)"""
+def run_ai_analysis(mode, system_data, fda_data, earnings_data):
+    """실적 발표일(earnings_data)을 프롬프트에 추가"""
+    
+    # 실적 발표 임박 시 경고 추가
+    earnings_warning = ""
+    if earnings_data['days_left'] <= 7 and earnings_data['days_left'] >= 0:
+        earnings_warning = f"\n🚨 [긴급] 실적 발표가 {earnings_data['d_day']} 남았습니다! 변동성 주의 경고를 포함하세요."
+
+    if mode == "BIO":
+        role = "바이오/제약 전문 투자자"
+        prompt = f"""
+        [데이터]
+        {system_data}
+        [실적일정]
+        다음 발표일: {earnings_data['date']} ({earnings_data['d_day']}) {earnings_warning}
+        [FDA/임상]
+        {fda_data}
+        
+        [지시]
+        1. FDA 이슈와 실적 일정(Earnings)을 고려해 리스크 분석.
+        2. 최신 임상 결과 및 뉴스 검색.
+        3. 실적 발표가 가까우면 관망 권고 고려.
+        
+        [양식]
+        ## 💊 FDA/임상/실적
+        (내용)
+        ## 📰 뉴스 팩트체크
+        (내용)
+        ## 🎯 결론
+        (매수🟢/관망🟡/매도🔴) - (이유)
+        """
+    else:
+        role = "월스트리트 기술주 전문가"
+        prompt = f"""
+        [데이터]
+        {system_data}
+        [실적일정]
+        다음 발표일: {earnings_data['date']} ({earnings_data['d_day']}) {earnings_warning}
+        
+        [지시]
+        1. 실적 발표 일정에 따른 변동성 리스크 분석.
+        2. 최근 24시간 내 공시 및 뉴스 검색.
+        3. 기술적 위치 분석.
+        
+        [양식]
+        ## 🏢 실적/뉴스 이슈
+        (내용)
+        ## ⚠️ 리스크 체크
+        (내용)
+        ## 🎯 결론
+        (매수🟢/관망🟡/매도🔴) - (이유)
+        """
 
     url = "https://api.perplexity.ai/chat/completions"
     headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "sonar",
-        "messages": [{"role": "system", "content": "핵심만 요약하는 금융 전문가."}, {"role": "user", "content": prompt}],
+        "messages": [{"role": "system", "content": f"당신은 {role}입니다. 면책조항 금지. 팩트 기반 직설적 답변."}, {"role": "user", "content": prompt}],
         "temperature": 0.2
     }
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
-    except requests.Timeout:
-        return "⏱️ Perplexity 타임아웃 - 나중에 다시 시도하세요"
-    except requests.ConnectionError:
-        return "🔌 Perplexity 연결 실패 - 인터넷 확인"
-    except Exception as e:
-        return f"❌ 분석 실패: {str(e)[:40]}"
+        return requests.post(url, json=payload, headers=headers).json()["choices"][0]["message"]["content"]
+    except Exception as e: return f"AI 분석 실패: {e}"
 
 def extract_signal(text):
     text = text.lower()
-    if "🟢" in text or "매수" in text: return "매수 기회", "#d4edda", "#155724" # 배경, 글자색
+    if "🟢" in text or "매수" in text: return "매수 기회", "#d4edda", "#155724"
     elif "🔴" in text or "매도" in text: return "위험/매도", "#f8d7da", "#721c24"
     else: return "관망 필요", "#fff3cd", "#856404"
 
 # ==========================================
-# [메인 UI] 모바일 레이아웃
+# [4] 메인 로직
 # ==========================================
-if "analysis_data" not in st.session_state: st.session_state.analysis_data = None
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
 
-st.title("🧬 미국 주식 세력 탐지기")
-st.caption("Chart + FDA + News (Mobile Ver.)")
+st.title("📡 미국 주식 세력 탐지기")
+st.caption("Bio/Tech Auto-Detect + Earnings Alert 📅")
 
-# 입력창과 버튼
-col_input, col_btn = st.columns([2, 1])
-with col_input:
-    ticker = st.text_input("티커", value="IONQ", label_visibility="collapsed", placeholder="티커 입력").upper().strip()
-with col_btn:
-    # use_container_width=True가 모바일 핵심
-    run_btn = st.button("분석 🚀", type="primary", use_container_width=True) 
+col_in, col_btn = st.columns([2, 1])
+ticker = col_in.text_input("티커", value="NVDA", label_visibility="collapsed").upper().strip()
+run = col_btn.button("분석 🚀", type="primary", use_container_width=True)
 
-if run_btn:
-    with st.spinner("섹터 분석 및 데이터 채굴 중..."):
+if run:
+    with st.spinner(f"[{ticker}] 데이터 채굴 및 실적 일정 조회 중..."):
         try:
             client = RESTClient(API_KEY)
+            
+            # 1. 정보 수집 (기본정보 + 실적발표일)
+            info = get_ticker_info(ticker, client)
+            earnings = get_earnings_info(ticker) # 👈 실적 조회 추가됨
+            
+            company_name = info['name']
+            is_bio = info['is_bio']
+            mode = "BIO" if is_bio else "GENERAL"
 
-            # 1️⃣ SIC 코드 기반 정확한 섹터 분류
-            ticker_info = get_ticker_info_detailed(ticker, client)
-            company_name = ticker_info["name"]
-            sic_code = ticker_info["sic_code"]
-            is_bio = ticker_info["is_bio"]
-            classification_reason = ticker_info["reason"]
-
-            # 사용자에게 현재 모드 알려주기
-            if is_bio:
-                st.toast(f"🧬 BIO 섹터 감지 ({classification_reason})! FDA 데이터베이스 연결...", icon="💊")
-            else:
-                st.toast(f"💻 GENERAL 섹터 ({classification_reason}) - 뉴스 & 실적 분석...", icon="🏢")
-
-            # 2️⃣ 차트 데이터 수집
-            end_dt = get_est_date()
+            # 2. 차트 데이터
+            end_dt = datetime.now(pytz.timezone("America/New_York"))
             start_dt = end_dt - timedelta(days=14)
             aggs = list(client.list_aggs(ticker, 1, "minute", start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), limit=50000))
 
             if not aggs:
-                st.error(f"❌ '{ticker}' 데이터를 찾을 수 없습니다.")
+                st.error(f"❌ '{ticker}' 데이터 없음")
             else:
-                # 3️⃣ 기술적 지표 계산
                 current_price = aggs[-1].close
                 total_vol = sum(a.volume for a in aggs)
                 total_pv = sum(((a.high+a.low+a.close)/3)*a.volume for a in aggs)
@@ -374,256 +231,87 @@ if run_btn:
                 support = max(price_vol, key=price_vol.get)
                 diff = ((current_price - vwap)/vwap)*100
 
-                # 4️⃣ 데이터 세션 저장
+                fda_info = get_fda_data(company_name) if is_bio else "해당 없음"
+
                 st.session_state.analysis_data = {
-                    "ticker": ticker,
-                    "name": company_name,
-                    "price": current_price,
-                    "is_bio": is_bio,
-                    "sic_code": sic_code
+                    "ticker": ticker, "name": company_name, "price": current_price, "mode": mode
                 }
 
-                # 5️⃣ 화면 표시 - 섹터 배지
-                badge_color = "#e6fffa" if is_bio else "#e6f7ff"
-                badge_text = "🧬 BIO/PHARMA" if is_bio else "💻 TECH/GENERAL"
-                sic_display = f" (SIC {sic_code})" if sic_code else " (No SIC)"
+                # 3. 화면 표시 (배지)
+                badge_bg = "#e6fffa" if is_bio else "#e6f7ff"
+                badge_txt = "🧬 BIO" if is_bio else "💻 TECH"
+                
+                # 실적 D-Day에 따른 경고 배지
+                earnings_badge = ""
+                if earnings['days_left'] <= 7 and earnings['days_left'] >= 0:
+                     earnings_badge = f"<span class='d-day-badge'>🚨 실적 {earnings['d_day']}</span>"
+                
                 st.markdown(f"""
-                <div style='text-align:center; background-color:{badge_color}; padding:8px; border-radius:8px; margin-bottom:15px; font-size:0.9rem; color:#333; font-weight:bold;'>
-                    {badge_text}{sic_display}
+                <div style='text-align:center; margin-bottom:10px;'>
+                    <span style='background-color:{badge_bg}; padding:5px 10px; border-radius:5px; font-weight:bold; color:#555; margin-right:5px;'>{badge_txt}</span>
+                    {earnings_badge}
                 </div>
                 """, unsafe_allow_html=True)
 
-                # 5-1️⃣ 실적발표일 먼저 조회 (메트릭 표시 전에)
-                earnings_info = get_earnings_date_hybrid(ticker, company_name)
+                # 메트릭 (2열 -> 2열 2행으로 확장)
+                c1, c2 = st.columns(2)
+                c1.metric("현재가", f"${current_price}")
+                c2.metric("세력평단", f"${vwap:.2f}", f"{diff:.1f}%")
+                
+                c3, c4 = st.columns(2)
+                c3.metric("강력 지지선", f"${support}")
+                c4.metric("다음 실적발표", f"{earnings['date']}", f"{earnings['d_day']}") # 👈 실적 메트릭 추가
 
-                # 모바일용 메트릭 배치 (2x2 그리드)
-                m1, m2 = st.columns(2)
-                m1.metric("현재가", f"${current_price}")
-                m2.metric("세력평단", f"${vwap:.2f}", f"{diff:.1f}%")
+                # 4. AI 분석
+                sys_data = f"종목: {ticker}({company_name}), 가격: {current_price}, VWAP: {vwap:.2f}"
+                ai_res = run_ai_analysis(mode, sys_data, fda_info, earnings) # 👈 실적 정보 AI 전달
 
-                m3, m4 = st.columns(2)
-                m3.metric("강력 지지선", f"${support}")
-
-                # 실적 발표일 메트릭 (D-Day에 따른 조건부 표시)
-                if earnings_info['days_left'] <= 7 and earnings_info['days_left'] >= 0:
-                    m4.metric("다음 실적발표", f"{earnings_info['date']}", earnings_info['d_day'], delta_color="inverse")
-                else:
-                    m4.metric("다음 실적발표", f"{earnings_info['date']}", earnings_info['d_day'])
-
-                # 실적발표일 경고 배지 및 상세 표시
-                earnings_placeholder = st.empty()
-
-                # 6️⃣ AI 분석 (모드별 조건부 프롬프트)
-                sys_data = f"종목: {ticker}({company_name}), SIC: {sic_code if sic_code else 'N/A'}, 가격: {current_price}, VWAP: {vwap:.2f}, 지지선: {support}"
-
-                # BIO 모드: FDA 필수, GENERAL 모드: FDA 스킵
-                if is_bio:
-                    # 병렬 처리: FDA + Gemini (실적은 이미 조회함)
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                        fda_future = executor.submit(get_fda_enforcements, company_name)
-                        gemini_res = analyze_with_gemini(f"생명공학 회사의 기술적 분석\n{sys_data}")
-                        fda_info = fda_future.result()
-
-                    # BIO용 프롬프트 (실적 정보 포함)
-                    earnings_context = ""
-                    if earnings_info['days_left'] <= 7 and earnings_info['days_left'] >= 0:
-                        earnings_context = f"\n🚨 [긴급] 실적 발표가 {earnings_info['d_day']} 남았습니다! 변동성 리스크와 조정 가능성을 강조하세요."
-
-                    pplx_prompt = f"""[BIO 섹터 분석]
-[종목 데이터]
-{sys_data}
-
-[실적 발표 일정]
-다음 발표: {earnings_info['date']} ({earnings_info['d_day']}) {earnings_context}
-
-[FDA 규제 현황]
-{fda_info}
-
-[기술적 분석]
-{gemini_res}
-
-[분석 지시]
-1. FDA 리콜/제재와 실적 일정을 함께 고려한 리스크 분석
-2. 최근 임상 결과, PDUFA 날짜, 파이프라인 이슈 검색 (24시간)
-3. 실적 발표가 가까우면 변동성 주의 권고 추가
-4. 기술적 위치(VWAP, 지지선)와 결합하여 종합 판단
-5. 면책조항 금지
-
-[결과 양식]
-## 💊 FDA/임상/실적
-(FDA 이슈와 실적 영향도)
-
-## 📰 바이오 뉴스 체크
-(최근 뉴스 요약)
-
-## 🎯 결론
-(매수🟢/관망🟡/매도🔴) - (한줄 이유)"""
-                else:
-                    # GENERAL 모드: FDA 제외, Gemini만 사용
-                    gemini_res = analyze_with_gemini(f"기술주/성장주 기술적 분석\n{sys_data}")
-                    fda_info = "해당 없음 (Non-Bio Sector)"
-
-                    # GENERAL용 프롬프트 (실적 정보 포함)
-                    earnings_context = ""
-                    if earnings_info['days_left'] <= 7 and earnings_info['days_left'] >= 0:
-                        earnings_context = f"\n🚨 [긴급] 실적 발표가 {earnings_info['d_day']} 남았습니다! 변동성 리스크와 조정 가능성을 강조하세요."
-
-                    pplx_prompt = f"""[일반/기술 섹터 분석]
-[종목 데이터]
-{sys_data}
-
-[실적 발표 일정]
-다음 발표: {earnings_info['date']} ({earnings_info['d_day']}) {earnings_context}
-
-[기술적 분석]
-{gemini_res}
-
-[분석 지시]
-1. 실적 발표 일정에 따른 변동성 리스크 분석
-2. 최신 실적, CEO 발언, 제품 출시, 계약 공시 검색 (24시간)
-3. 거시 경제 영향 및 경쟁 구도 분석
-4. 기술적 위치(VWAP, 지지선)와 결합하여 판단
-5. 면책조항 금지
-
-[결과 양식]
-## 🏢 실적/뉴스 이슈
-(실적 일정, 뉴스, 공시 요약)
-
-## ⚠️ 리스크 체크
-(발견된 위험요소)
-
-## 🎯 결론
-(매수🟢/관망🟡/매도🔴) - (한줄 이유)"""
-
-                # Perplexity 분석 (모드별 다른 프롬프트)
-                url = "https://api.perplexity.ai/chat/completions"
-                headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-                payload = {
-                    "model": "sonar",
-                    "messages": [
-                        {"role": "system", "content": f"당신은 {'바이오/제약 투자 전문가' if is_bio else '기술주/성장주 전문가'}입니다. 팩트 기반으로 직설적 답변. 면책조항 금지."},
-                        {"role": "user", "content": pplx_prompt}
-                    ],
-                    "temperature": 0.2
-                }
-
-                try:
-                    pplx_res = requests.post(url, json=payload, headers=headers, timeout=30).json()["choices"][0]["message"]["content"]
-                except Exception as e:
-                    pplx_res = f"❌ 분석 실패: {str(e)[:40]}"
-
-                # 📅 실적발표일 상세 배지 표시 (D-day 계산 + 조건부 강조)
-                if earnings_info['days_left'] < 999:  # 데이터 있음
-                    days_until = earnings_info['days_left']
-
-                    # 조건부 배경색 및 아이콘
-                    if days_until <= 7 and days_until >= 0:
-                        emoji = "🔴"  # 빨강: 임박한 날짜 (D-7 이하)
-                        bg = "#ffe6e6"
-                        border = "#ff4444"
-                    elif days_until < 0:
-                        emoji = "⏰"  # 회색: 이미 지난 날짜
-                        bg = "#f0f0f0"
-                        border = "#999999"
-                    else:
-                        emoji = "🟢"  # 초록: 여유 있음
-                        bg = "#e6ffe6"
-                        border = "#44ff44"
-
-                    earnings_display = f"{emoji} 다음 실적발표: {earnings_info['date']} ({earnings_info['d_day']}) [{earnings_info['source']}]"
-
-                    earnings_placeholder.markdown(f"""
-                    <div style='background-color:{bg}; border-left: 4px solid {border}; padding: 12px; border-radius: 8px; margin: 10px 0; font-weight: bold;'>
-                        {earnings_display}
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                # 최종 신호 카드
-                sig_text, bg_color, text_color = extract_signal(pplx_res)
+                # 결과 카드
+                sig_text, bg, txt = extract_signal(ai_res)
                 st.markdown(f"""
-                <div style="background-color:{bg_color}; padding:15px; border-radius:12px; text-align:center; margin:15px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-                    <h3 style="color:{text_color}; margin:0; font-size:1.5rem;">{sig_text}</h3>
+                <div style="background-color:{bg}; padding:15px; border-radius:12px; text-align:center; margin:15px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                    <h3 style="color:{txt}; margin:0; font-size:1.5rem;">{sig_text}</h3>
                 </div>
                 """, unsafe_allow_html=True)
 
-                # 분석 결과 아코디언
-                with st.expander(f"📊 {'💊 BIO' if is_bio else '🏢 GENERAL'} 상세 분석 결과", expanded=False):
-                    st.markdown(pplx_res)
-
-                # BIO 모드일 때만 FDA 아코디언 표시
+                with st.expander("📊 상세 분석 결과", expanded=False):
+                    st.markdown(ai_res)
+                
                 if is_bio:
-                    with st.expander("💊 FDA 규제 데이터 원본", expanded=False):
-                        st.text(fda_info)
-                else:
-                    with st.expander("ℹ️ 섹터 분류 정보", expanded=False):
-                        st.info(f"**분류:** GENERAL (Non-Bio)\n**SIC 코드:** {sic_code if sic_code else 'N/A'}\n**판단 기준:** {classification_reason}")
+                    with st.expander("💊 FDA 리콜 내역", expanded=False): st.text(fda_info)
 
-                st.session_state.chat_history.append({
-                    "role": "assistant",
-                    "content": f"[{ticker}/{('BIO' if is_bio else 'GENERAL')}] {sig_text}\n\n{pplx_res}"
-                })
+                st.session_state.chat_history.append({"role": "assistant", "content": f"[{ticker}] {sig_text}\n{ai_res}"})
 
         except Exception as e:
             st.error(f"오류: {e}")
 
 # ==========================================
-# [채팅] 하단 고정 느낌
+# [5] 채팅
 # ==========================================
 st.divider()
 st.subheader("💬 AI 질문")
 
-# 최신 메시지 2개만 보여주기 (모바일 공간 절약)
-recent_msgs = st.session_state.chat_history[-2:] if len(st.session_state.chat_history) > 2 else st.session_state.chat_history
-if len(st.session_state.chat_history) > 2:
-    st.caption(f"이전 대화 {len(st.session_state.chat_history)-2}개 숨김")
-
-for msg in recent_msgs:
+msgs = st.session_state.chat_history[-2:] if len(st.session_state.chat_history) > 2 else st.session_state.chat_history
+for msg in msgs:
     with st.chat_message(msg["role"]): st.write(msg["content"])
 
-if question := st.chat_input("질문 입력 (예: 악재 있어?, 목표가는?)"):
-    st.session_state.chat_history.append({"role": "user", "content": question})
-    with st.chat_message("user"):
-        st.write(question)
-
+if q := st.chat_input("질문 (예: 실적 전망 어때?)"):
+    st.session_state.chat_history.append({"role": "user", "content": q})
+    with st.chat_message("user"): st.write(q)
+    
     with st.chat_message("assistant"):
-        with st.spinner("분석 중..."):
-            context = ""
-            mode_hint = ""
-
+        with st.spinner("검색 중..."):
+            ctx = ""
             if st.session_state.analysis_data:
-                data = st.session_state.analysis_data
-                ticker = data["ticker"]
-                is_bio = data.get("is_bio", False)
-                context = f"[종목:{ticker}, 모드:{'BIO' if is_bio else 'GENERAL'}]"
-
-                # 모드별 힌트
-                mode_hint = "바이오 회사의 FDA/임상 이슈를 중심으로" if is_bio else "기술주의 실적/뉴스를 중심으로"
-
-            # 모드별 프롬프트
-            chat_prompt = f"""데이터:{context}
-질문:{question}
-
-지시:
-- {mode_hint} 답변
-- 최신 뉴스 검색 (24시간 우선)
-- 면책조항 금지
-- 짧고 명확하게 (3줄 이내)"""
-
-            headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-            chat_payload = {
-                "model": "sonar",
-                "messages": [{"role": "user", "content": chat_prompt}],
-                "temperature": 0.2
-            }
-
+                d = st.session_state.analysis_data
+                ctx = f"[종목:{d['ticker']}, 모드:{d['mode']}]"
+            
+            p = f"데이터:{ctx}\n질문:{q}\n지시: 최신뉴스,실적전망포함,면책조항금지."
+            h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
+            d = {"model": "sonar", "messages": [{"role": "user", "content": p}], "temperature": 0.2}
             try:
-                response = requests.post("https://api.perplexity.ai/chat/completions", json=chat_payload, headers=headers, timeout=30).json()
-                answer = response["choices"][0]["message"]["content"]
-                st.write(answer)
-                st.session_state.chat_history.append({"role": "assistant", "content": answer})
-            except requests.Timeout:
-                st.error("⏱️ 요청 타임아웃 (다시 시도하세요)")
-            except requests.ConnectionError:
-                st.error("🔌 네트워크 연결 실패")
-            except Exception as e:
-                st.error(f"오류: {str(e)[:50]}")
+                r = requests.post("https://api.perplexity.ai/chat/completions", json=d, headers=h).json()
+                ans = r["choices"][0]["message"]["content"]
+                st.write(ans)
+                st.session_state.chat_history.append({"role": "assistant", "content": ans})
+            except: st.error("오류")
