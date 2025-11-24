@@ -1,3 +1,7 @@
 streamlit
 polygon-api-client
 google-generativeai
+pillow
+pytz
+requests
+yfinance
