@@ -3,6 +3,8 @@ from polygon import RESTClient
 from datetime import datetime, timedelta
 from collections import defaultdict
 import google.generativeai as genai
+from PIL import Image
+import io
 
 # ==========================================
 # [기본 설정] 페이지 제목 및 아이콘
@@ -206,3 +208,131 @@ if user_input:
 else:
     if not st.session_state.analysis_data:
         st.info("📊 먼저 종목을 분석해주세요!")
+
+# ==========================================
+# [탭 기능] - 차트 분석 & 뉴스 분석
+# ==========================================
+st.divider()
+tab1, tab2 = st.tabs(["📊 차트 분석", "📰 뉴스 분석"])
+
+# ==========================================
+# [탭 1] 차트 업로드 분석
+# ==========================================
+with tab1:
+    st.subheader("차트 이미지 분석")
+    st.write("주식 차트 이미지를 업로드하면 AI가 기술적 분석을 수행합니다.")
+
+    uploaded_chart = st.file_uploader(
+        "차트 이미지 업로드 (PNG, JPG, GIF)",
+        type=["png", "jpg", "jpeg", "gif"],
+        key="chart_uploader"
+    )
+
+    if uploaded_chart is not None:
+        # 이미지 표시
+        image = Image.open(uploaded_chart)
+        st.image(image, caption="업로드된 차트", use_column_width=True)
+
+        # AI 분석
+        if st.button("🔍 차트 분석 시작", key="analyze_chart"):
+            with st.spinner("차트를 분석 중입니다..."):
+                try:
+                    # 사용 가능한 모델 선택
+                    available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+                    model_priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+                    selected_model = "gemini-1.5-flash"
+
+                    for model_name in model_priority:
+                        if any(model_name in m for m in available_models):
+                            selected_model = model_name
+                            break
+
+                    model = genai.GenerativeModel(selected_model)
+
+                    # 이미지를 바이너리로 변환
+                    image_data = uploaded_chart.getvalue()
+
+                    # 차트 분석 프롬프트
+                    analysis_prompt = """이 차트는 주식 기술적 분석 차트입니다.
+
+다음 항목들을 분석해주세요:
+1. **현재 추세** - 상승/하락/횡보 중 어느 것인가?
+2. **주요 저항선/지지선** - 어디에 있는가?
+3. **기술적 신호** - 매수/매도 신호가 보이는가?
+4. **거래량** - 거래량 추세는 어떤가?
+5. **투자 조언** - 현재 진입/청산하기 좋은 타이밍인가?
+
+모든 분석은 한국어로 상세하게 제공해주세요."""
+
+                    response = model.generate_content([analysis_prompt, image])
+                    analysis_result = response.text
+
+                    st.success("분석 완료!")
+                    st.markdown(analysis_result)
+
+                except Exception as e:
+                    st.error(f"차트 분석 실패: {e}")
+
+# ==========================================
+# [탭 2] 뉴스 기반 분석
+# ==========================================
+with tab2:
+    st.subheader("주식 뉴스 분석")
+    st.write("주식 관련 뉴스를 입력하면 AI가 주가에 미칠 영향을 분석합니다.")
+
+    news_input = st.text_area(
+        "분석할 뉴스를 입력하세요",
+        placeholder="예: 삼성전자가 신제품 발표를 했습니다. AI 칩의 성능이 기존 제품 대비 50% 향상되었습니다...",
+        height=150
+    )
+
+    news_ticker = st.text_input(
+        "해당 종목 코드 (선택사항)",
+        placeholder="예: NVDA, TSLA"
+    )
+
+    if st.button("📊 뉴스 영향도 분석", key="analyze_news"):
+        if not news_input.strip():
+            st.warning("뉴스를 입력해주세요!")
+        else:
+            with st.spinner("뉴스를 분석 중입니다..."):
+                try:
+                    # 사용 가능한 모델 선택
+                    available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+                    model_priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+                    selected_model = "gemini-1.5-flash"
+
+                    for model_name in model_priority:
+                        if any(model_name in m for m in available_models):
+                            selected_model = model_name
+                            break
+
+                    model = genai.GenerativeModel(selected_model)
+
+                    # 뉴스 분석 프롬프트
+                    ticker_context = f"종목: {news_ticker}\n" if news_ticker else ""
+                    analysis_prompt = f"""당신은 금융 분석가입니다.
+
+{ticker_context}다음 뉴스를 분석해주세요:
+
+"{news_input}"
+
+이 뉴스를 바탕으로 다음을 분석해주세요:
+
+1. **뉴스 요약** - 이 뉴스의 핵심은 무엇인가?
+2. **긍정/부정 영향** - 주가에 긍정적인지 부정적인지?
+3. **영향도 수치** (1~10) - 주가에 얼마나 큰 영향을 미칠 것 같은가?
+4. **영향받을 업종/종목** - 어떤 업종이나 종목이 영향받을 것인가?
+5. **투자 전략** - 이를 바탕으로 어떤 투자 전략을 취해야 하는가?
+6. **주의사항** - 투자할 때 주의할 점은 무엇인가?
+
+모든 분석은 한국어로 상세하고 객관적으로 제공해주세요."""
+
+                    response = model.generate_content(analysis_prompt)
+                    news_analysis = response.text
+
+                    st.success("분석 완료!")
+                    st.markdown(news_analysis)
+
+                except Exception as e:
+                    st.error(f"뉴스 분석 실패: {e}")
