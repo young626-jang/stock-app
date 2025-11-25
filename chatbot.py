@@ -33,6 +33,16 @@ st.markdown("""
     .stWrite, .stWrite p { color: #fff !important; }
     .stExpander { color: #fff !important; }
     .stExpanderContent { color: #fff !important; }
+
+    /* 입력창 글씨색 흰색 */
+    .stTextInput input { color: #fff !important; background-color: #1a1a1a !important; }
+    .stTextInput input::placeholder { color: #888 !important; }
+    .stChatInput input { color: #fff !important; background-color: #1a1a1a !important; }
+    .stChatInput input::placeholder { color: #888 !important; }
+    input { color: #fff !important; background-color: #1a1a1a !important; }
+    input::placeholder { color: #888 !important; }
+    textarea { color: #fff !important; background-color: #1a1a1a !important; }
+    textarea::placeholder { color: #888 !important; }
     
     /* 폰트 & 타이포그래피 */
     h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; margin-bottom: 0px;}
