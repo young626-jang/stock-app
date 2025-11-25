@@ -76,11 +76,20 @@ st.markdown(f"""
         text-align: center;
         margin-bottom: 15px;
         box-shadow: 0 0 10px currentColor, inset 0 0 5px currentColor;
-        transition: transform 0.3s ease;
+        transition: all 0.3s ease;
     }}
     .neon-card:hover {{
-        transform: scale(1.03);
-        box-shadow: 0 0 20px currentColor, inset 0 0 10px currentColor;
+        transform: scale(1.05);
+        box-shadow: 0 0 30px currentColor, inset 0 0 15px currentColor;
+    }}
+
+    /* 카드 설명 텍스트 */
+    .neon-desc {{
+        font-size: 0.75rem; color: #aaa; margin-top: 8px;
+        opacity: 0.6; transition: all 0.3s ease;
+    }}
+    .neon-card:hover .neon-desc {{
+        opacity: 1; color: currentColor;
     }}
 
     /* 메트릭 제목 & 값 */
@@ -377,60 +386,74 @@ if st.session_state.is_running:
                 # 1. 추세 (Trend) - 상승:네온레드 / 하락:네온블루
                 if is_up:
                     trend_color = "#ff003c" # Neon Red
+                    trend_desc = "강한 상승 추세"
                 else:
                     trend_color = "#00f2ff" # Cyan Blue
+                    trend_desc = "약한 하락 추세"
 
                 with c_1:
                     st.markdown(f"""
                     <div class='neon-card' style='color: {trend_color};'>
                         <div class='metric-title'>TREND</div>
                         <div class='metric-value' style='text-shadow: 0 0 10px {trend_color}'>{trend}</div>
+                        <div class='neon-desc'>{trend_desc}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
-                # 2. RSI - 네온 옐로우
+                # 2. RSI - 네온 옐로우 (상태 표시)
                 rsi_color = "#ffe600" # Neon Yellow
+                if row['RSI'] < 30:
+                    rsi_desc = "과매도 (매수신호)"
+                elif row['RSI'] > 70:
+                    rsi_desc = "과매수 (매도신호)"
+                else:
+                    rsi_desc = "중립 (관망)"
+
                 with c_2:
                     st.markdown(f"""
                     <div class='neon-card' style='color: {rsi_color};'>
                         <div class='metric-title'>RSI (14)</div>
                         <div class='metric-value' style='text-shadow: 0 0 10px {rsi_color}'>{row['RSI']:.1f}</div>
+                        <div class='neon-desc'>{rsi_desc}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
                 # 3. 거래량 (Volume) - 네온 그린 (고래 출현시 더 밝게)
                 vol_color = "#39ff14" if "고래" in whale else "#008000" # Neon Green vs Dark Green
+                vol_desc = "고래 활동 감지!" if "고래" in whale else "정상 거래량"
+
                 with c_3:
                     st.markdown(f"""
                     <div class='neon-card' style='color: {vol_color};'>
                         <div class='metric-title'>VOLUME</div>
                         <div class='metric-value' style='text-shadow: 0 0 10px {vol_color}'>{whale}</div>
+                        <div class='neon-desc'>{vol_desc}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
                 # ==========================================
-                # [네온 스타일] 특이 신호 감지
+                # [네온 스타일] 특이 신호 감지 (항상 노출)
                 # ==========================================
                 has_signal = bool(is_squeeze or (whale_ratio >= 3.0))
 
-                signal_title = "🚨 SIGNAL DETECTED" if has_signal else "💤 SIGNAL STATUS"
+                st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)  # 간격
 
-                with st.expander(signal_title, expanded=has_signal):
-                    if has_signal:
-                        # 켜진 네온 박스
-                        html_content = "<div class='signal-box-on'>"
-                        if is_squeeze: html_content += "<div>⚡ <b>BOLLINGER SQUEEZE</b> (에너지 응축)</div>"
-                        if whale_ratio >= 3.0: html_content += f"<div style='margin-top:5px'>🟣 <b>WHALE VOLUME</b> (평소의 {whale_ratio:.1f}배)</div>"
-                        html_content += "</div>"
-                        st.markdown(html_content, unsafe_allow_html=True)
-                    else:
-                        # 꺼진 네온 박스
-                        st.markdown(f"""
-                        <div class='signal-box-off'>
-                            <div style='font-size: 1.2rem; margin-bottom:5px;'>✅ SYSTEM NORMAL</div>
-                            <div style='font-size: 0.8rem;'>특이 신호 감지되지 않음</div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                if has_signal:
+                    # 켜진 네온 박스
+                    html_content = "<div class='signal-box-on'>"
+                    html_content += "<div style='font-weight: bold; font-size: 1.1rem; margin-bottom: 10px;'>🚨 SIGNAL DETECTED</div>"
+                    if is_squeeze: html_content += "<div>⚡ <b>BOLLINGER SQUEEZE</b> (에너지 응축)</div>"
+                    if whale_ratio >= 3.0: html_content += f"<div style='margin-top:8px'>🟣 <b>WHALE VOLUME</b> (평소의 {whale_ratio:.1f}배)</div>"
+                    html_content += "</div>"
+                    st.markdown(html_content, unsafe_allow_html=True)
+                else:
+                    # 꺼진 네온 박스
+                    st.markdown(f"""
+                    <div class='signal-box-off'>
+                        <div style='font-size: 1.2rem; margin-bottom:5px;'>✅ SYSTEM NORMAL</div>
+                        <div style='font-size: 0.8rem;'>특이 신호 감지되지 않음</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
                 c_t, c_s = st.columns(2)
                 with c_t: st.markdown(f"<div class='target-box'><div>Target</div><div style='font-size:1.4rem'>${target:.2f}</div></div>", unsafe_allow_html=True)
