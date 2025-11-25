@@ -51,12 +51,16 @@ st.markdown("""
     .metric-title { font-size: 0.9rem; color: #aaa; font-weight: bold; } 
     .metric-value { font-size: 1.2rem; font-weight: bold; color: #fff; margin-top: 5px;}
     
-    /* 가이드 박스 스타일 */
-    .guide-box {
-        background-color: #1a1a1a; border-left: 3px solid #00ff41;
-        padding: 10px; margin-bottom: 5px; font-size: 0.9rem;
+    /* 동적 진단 박스 스타일 (NEW) */
+    .diagnosis-box {
+        background-color: #111; 
+        border-left: 5px solid #555;
+        padding: 15px; 
+        margin-bottom: 8px; 
+        font-size: 1rem;
+        border-radius: 0 8px 8px 0;
     }
-    .guide-title { color: #00ff41; font-weight: bold; }
+    .diag-title { font-weight: bold; margin-right: 10px; }
     
     /* 매크로 바 */
     .macro-bar {
@@ -267,7 +271,8 @@ if run:
                 cut = row['close'] - (row['ATR'] * 1.5)
                 
                 trend = "📈 상승세" if row['close'] > row['SMA20'] else "📉 하락세"
-                whale = f"🐋 고래출현 ({row['volume']/row['VolAvg20']:.1f}x)" if row['volume'] > row['VolAvg20']*3 else "일반 수급"
+                whale_ratio = row['volume']/row['VolAvg20']
+                whale = f"🐋 고래출현 ({whale_ratio:.1f}x)" if whale_ratio > 3.0 else "일반 수급"
                 
                 # UI 출력
                 st.markdown(f"<h1 style='margin:0'>{ticker}</h1>", unsafe_allow_html=True)
@@ -288,14 +293,44 @@ if run:
                     st.markdown(f"""<div class='signal-card'><div class='metric-title'>거래량 (VOLUME)</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
 
                 # ==========================================
-                # [🔥 추가된 기능] 친절한 지표 가이드 (클릭 시 펼쳐짐)
+                # [🔥 실시간 맞춤형 진단 기능]
                 # ==========================================
-                with st.expander("📘 지표가 무슨 뜻인가요? (초보자 가이드)", expanded=False):
-                    st.markdown("""
-                    <div class='guide-box'><span class='guide-title'>RSI (14):</span> 30 이하면 '과매도(줍줍 기회)', 70 이상이면 '과매수(조정 주의)'. 14일간의 상승/하락 힘을 비교합니다.</div>
-                    <div class='guide-box'><span class='guide-title'>거래량 (Whale):</span> 평소보다 3배 이상 터지면 '고래(세력)'가 들어왔거나 나갔다는 강력한 신호입니다.</div>
-                    <div class='guide-box'><span class='guide-title'>타겟/손절가 (ATR):</span> 변동성을 계산해 만든 수학적 가격입니다. 감으로 팔지 말고 이 가격을 참고하세요.</div>
-                    <div class='guide-box'><span class='guide-title'>추세 (Trend):</span> 20일 이동평균선 위에 있으면 상승세, 아래면 하락세입니다.</div>
+                with st.expander("🔍 현재 상태 정밀 진단 (Click)", expanded=True):
+                    # 1. RSI 진단
+                    rsi_val = row['RSI']
+                    if rsi_val <= 30:
+                        rsi_msg = f"현재 {rsi_val:.1f} (30 이하) ➔ 🟢 **과매도 구간! 기술적 반등 가능성 높음 (줍줍 기회)**"
+                        rsi_col = "#00ff41"
+                    elif rsi_val >= 70:
+                        rsi_msg = f"현재 {rsi_val:.1f} (70 이상) ➔ 🔴 **과매수 구간! 단기 조정 가능성 있음 (주의)**"
+                        rsi_col = "#ff4757"
+                    else:
+                        rsi_msg = f"현재 {rsi_val:.1f} ➔ ⚪ **중립 구간 (일반적인 흐름)**"
+                        rsi_col = "#ccc"
+                    
+                    # 2. 거래량 진단
+                    if whale_ratio >= 3.0:
+                        vol_msg = f"평소의 {whale_ratio:.1f}배 ➔ 🟣 **고래(세력)가 물량을 쓸어담거나 던지는 중! 방향성 주목**"
+                        vol_col = "#a29bfe"
+                    elif whale_ratio >= 1.5:
+                        vol_msg = f"평소의 {whale_ratio:.1f}배 ➔ 🟡 **거래량이 살아나는 중**"
+                        vol_col = "#f1c40f"
+                    else:
+                        vol_msg = f"평소와 비슷함 ({whale_ratio:.1f}배) ➔ ⚪ **특이사항 없음**"
+                        vol_col = "#ccc"
+
+                    # 3. 추세 진단
+                    if row['close'] > row['SMA20']:
+                        trend_msg = "현재가 > 20일선 ➔ 🟢 **상승 추세가 살아있음 (보유 관점)**"
+                        trend_col = "#00ff41"
+                    else:
+                        trend_msg = "현재가 < 20일선 ➔ 🔴 **하락 추세 진행 중 (방어적 대응 필요)**"
+                        trend_col = "#ff4757"
+
+                    st.markdown(f"""
+                    <div class='diagnosis-box' style='border-left-color: {rsi_col}'><span class='diag-title' style='color:{rsi_col}'>RSI 진단:</span> {rsi_msg}</div>
+                    <div class='diagnosis-box' style='border-left-color: {vol_col}'><span class='diag-title' style='color:{vol_col}'>수급 진단:</span> {vol_msg}</div>
+                    <div class='diagnosis-box' style='border-left-color: {trend_col}'><span class='diag-title' style='color:{trend_col}'>추세 진단:</span> {trend_msg}</div>
                     """, unsafe_allow_html=True)
 
                 c_t, c_s = st.columns(2)
