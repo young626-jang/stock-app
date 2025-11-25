@@ -481,7 +481,7 @@ if q := st.chat_input("종목 추천이나 분석 내용에 대해 질문하세�
 [Mission]
 1. 현재 미국 시장에서 가장 핫한 섹터와 종목 3개를 찾아 추천해라. (웹 검색)
 2. 이유를 명확히 설명해라 (거래량, 호재, 뉴스 등).
-3. 한국 주식 은어 사용 (떡상, 줍줍 등). '투자 책임' 언급 금지.
+3. 한국 주식 은어 사용 가능 (떡상, 줍줍 등) , 단 '투자 책임' 언급은 금지.
 [질문] {q}
 """
                 res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":content}],"temperature":0.5}, headers=h, timeout=20).json()
