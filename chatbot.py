@@ -27,81 +27,52 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* 폰트 & 타이포그래피 */
     h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; }
     h2, h3 { font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }
     
-    /* 점수판 */
-    .big-score {
-        font-size: 5rem; font-weight: 900; color: #00ff41; 
-        text-align: center; text-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
-        line-height: 1.1; margin-top: 10px;
-    }
-    .grade-badge {
-        font-size: 1.5rem; font-weight: bold; padding: 5px 15px;
-        border: 2px solid #00ff41; border-radius: 5px; color: #00ff41;
-        display: inline-block; margin-bottom: 20px;
-    }
+    .big-score { font-size: 5rem; font-weight: 900; color: #00ff41; text-align: center; line-height: 1.1; margin-top: 10px; }
+    .grade-badge { font-size: 1.5rem; font-weight: bold; padding: 5px 15px; border: 2px solid #00ff41; border-radius: 5px; color: #00ff41; display: inline-block; margin-bottom: 20px; }
 
-    /* 카드 디자인 */
-    .signal-card {
-        background-color: #111; border: 1px solid #333; border-radius: 8px;
-        padding: 15px; margin-bottom: 15px;
-    }
+    .signal-card { background-color: #111; border: 1px solid #333; border-radius: 8px; padding: 15px; margin-bottom: 15px; }
     .metric-title { font-size: 0.9rem; color: #aaa; font-weight: bold; } 
     .metric-value { font-size: 1.2rem; font-weight: bold; color: #fff; margin-top: 5px;}
     
-    /* 동적 진단 박스 스타일 (NEW) */
-    .diagnosis-box {
-        background-color: #111; 
-        border-left: 5px solid #555;
-        padding: 15px; 
-        margin-bottom: 8px; 
-        font-size: 1rem;
-        border-radius: 0 8px 8px 0;
+    /* 선행 지표 박스 (NEW) */
+    .early-warning-box {
+        background-color: #2d3436; border-left: 5px solid #0984e3;
+        padding: 15px; margin-bottom: 10px; border-radius: 0 8px 8px 0;
     }
-    .diag-title { font-weight: bold; margin-right: 10px; }
+    .squeeze-on { color: #00cec9; font-weight: bold; animation: pulse 2s infinite; }
     
-    /* 매크로 바 */
-    .macro-bar {
-        background-color: #0a0a0a; border-bottom: 1px solid #333;
-        padding: 8px; text-align: center; font-size: 0.9rem; color: #ff9f43;
-        font-family: 'Courier New', monospace; margin-bottom: 20px; font-weight: bold;
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
     }
-    
-    /* 가격 타겟 박스 */
+
+    .macro-bar { background-color: #0a0a0a; border-bottom: 1px solid #333; padding: 8px; text-align: center; font-size: 0.9rem; color: #ff9f43; font-family: 'Courier New', monospace; margin-bottom: 20px; font-weight: bold; }
     .target-box { border: 1px solid #00ff41; color: #00ff41; padding: 10px; border-radius: 5px; text-align: center; background: rgba(0, 255, 65, 0.05); }
     .stop-box { border: 1px solid #ff4b4b; color: #ff4b4b; padding: 10px; border-radius: 5px; text-align: center; background: rgba(255, 75, 75, 0.05); }
-
-    /* 실적 배지 */
     .earnings-badge { background-color: #ff4757; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
 
-    /* 버튼 */
-    .stButton > button {
-        width: 100%; background-color: #003300; color: #00ff41;
-        border: 1px solid #00ff41; height: 3.5em; font-weight: bold;
-        transition: all 0.3s;
-    }
+    .stButton > button { width: 100%; background-color: #003300; color: #00ff41; border: 1px solid #00ff41; height: 3.5em; font-weight: bold; transition: all 0.3s; }
     .stButton > button:hover { background-color: #00ff41; color: black; box-shadow: 0 0 15px #00ff41; }
     </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# [2] API 키 로드
-# ==========================================
 try:
     API_KEY = st.secrets["POLYGON_API_KEY"]
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     PERPLEXITY_API_KEY = st.secrets["PERPLEXITY_API_KEY"]
     FDA_API_KEY = st.secrets["FDA_API_KEY"]
 except:
-    st.error("🚨 API 키 오류: secrets.toml 파일을 확인하세요.")
+    st.error("🚨 API 키 오류")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# [3] 퀀트 엔진
+# [3] 퀀트 엔진 (볼린저 밴드 추가)
 # ==========================================
 def calculate_quant_metrics(df):
     delta = df['close'].diff()
@@ -110,19 +81,28 @@ def calculate_quant_metrics(df):
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
+    # MACD
     exp12 = df['close'].ewm(span=12, adjust=False).mean()
     exp26 = df['close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = exp12 - exp26
     df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     
+    # ATR
     high_low = df['high'] - df['low']
     high_close = np.abs(df['high'] - df['close'].shift())
     low_close = np.abs(df['low'] - df['close'].shift())
     df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
     
+    # SMA & Volume
     df['SMA20'] = df['close'].rolling(20).mean()
     df['VolAvg20'] = df['volume'].rolling(20).mean()
-    df['OBV'] = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
+    
+    # 🔥 볼린저 밴드 & 스퀴즈 (선행 지표)
+    std = df['close'].rolling(20).std()
+    df['Upper'] = df['SMA20'] + (std * 2)
+    df['Lower'] = df['SMA20'] - (std * 2)
+    # 밴드폭(Bandwidth)이 좁을수록 에너지 응축
+    df['Bandwidth'] = (df['Upper'] - df['Lower']) / df['SMA20']
     
     return df.iloc[-1]
 
@@ -140,6 +120,9 @@ def get_ai_score(row):
     vol_ratio = row['volume'] / row['VolAvg20']
     if vol_ratio > 3.0: score += 20
     elif vol_ratio > 1.5: score += 10
+    
+    # 스퀴즈 가산점
+    if row['Bandwidth'] < 0.10: score += 10 
     
     return min(100, max(0, int(score)))
 
@@ -178,7 +161,6 @@ def get_earnings_schedule(ticker):
             if not future.empty: return calc_d_day(future.index[0])
         except: pass
     except: pass
-    
     try:
         url = "https://api.perplexity.ai/chat/completions"
         h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
@@ -187,7 +169,6 @@ def get_earnings_schedule(ticker):
         match = re.search(r'\d{4}-\d{2}-\d{2}', res.json()['choices'][0]['message']['content'])
         if match: return calc_d_day(datetime.strptime(match.group(0), "%Y-%m-%d").date())
     except: pass
-    
     return {"d_day": "-", "date": "미정", "diff": 999}
 
 def calc_d_day(date_obj):
@@ -214,11 +195,10 @@ def get_fda_data(name):
 def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings):
     mode = "바이오" if fda and "FDA" in fda else "기술주"
     warn = f"🚨실적발표 {earnings['d_day']} 전!" if earnings['diff'] <= 7 else ""
-    
     prompt = f"""
     [ROLE] 월스트리트 퀀트 펀드매니저
     [TARGET] {ticker} (현재가: ${price})
-    [QUANT] Score: {score}, 추세: {indicators['trend']}, 수급: {indicators['whale']}
+    [QUANT] Score: {score}, 추세: {indicators['trend']}, 수급: {indicators['whale']}, 스퀴즈여부: {indicators['squeeze']}
     [DATA] 실적: {earnings['date']} ({earnings['d_day']}) {warn}, FDA: {fda}
     [MISSION] 실시간 뉴스(24h) 결합 분석. 면책조항 금지.
     [OUTPUT]
@@ -245,11 +225,11 @@ ticker = c1.text_input("TICKER", value="IONQ", label_visibility="collapsed").upp
 run = c2.button("시스템 스캔 시작 🚀")
 
 if run:
-    with st.spinner("AI 퀀트 엔진: 데이터 수집 및 분석 중..."):
+    with st.spinner("AI 퀀트 엔진: 선행 지표 분석 중..."):
         try:
             client = RESTClient(API_KEY)
             end = datetime.now(pytz.timezone("America/New_York"))
-            start = end - timedelta(days=60)
+            start = end - timedelta(days=80) # 볼린저 밴드 계산 위해 기간 늘림
             aggs = list(client.list_aggs(ticker, 1, "day", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), limit=50000))
             
             if not aggs:
@@ -274,6 +254,10 @@ if run:
                 whale_ratio = row['volume']/row['VolAvg20']
                 whale = f"🐋 고래출현 ({whale_ratio:.1f}x)" if whale_ratio > 3.0 else "일반 수급"
                 
+                # 🔥 선행 지표 감지 (Squeeze)
+                is_squeeze = row['Bandwidth'] < 0.10 # 밴드폭이 10% 이내로 좁아짐
+                squeeze_msg = "⚡ 에너지 응축 중 (폭발 임박!)" if is_squeeze else "일반 변동성 구간"
+                
                 # UI 출력
                 st.markdown(f"<h1 style='margin:0'>{ticker}</h1>", unsafe_allow_html=True)
                 if earnings['diff'] <= 7:
@@ -293,45 +277,26 @@ if run:
                     st.markdown(f"""<div class='signal-card'><div class='metric-title'>거래량 (VOLUME)</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
 
                 # ==========================================
-                # [🔥 실시간 맞춤형 진단 기능]
+                # [🔥 선행 매매 신호 박스]
                 # ==========================================
-                with st.expander("🔍 현재 상태 정밀 진단 (Click)", expanded=True):
-                    # 1. RSI 진단
-                    rsi_val = row['RSI']
-                    if rsi_val <= 30:
-                        rsi_msg = f"현재 {rsi_val:.1f} (30 이하) ➔ 🟢 **과매도 구간! 기술적 반등 가능성 높음 (줍줍 기회)**"
-                        rsi_col = "#00ff41"
-                    elif rsi_val >= 70:
-                        rsi_msg = f"현재 {rsi_val:.1f} (70 이상) ➔ 🔴 **과매수 구간! 단기 조정 가능성 있음 (주의)**"
-                        rsi_col = "#ff4757"
+                with st.expander("🔍 선행 매매 신호 (Early Warning)", expanded=True):
+                    # 스퀴즈 진단
+                    if is_squeeze:
+                        sq_html = f"<div class='early-warning-box'><span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈 감지!</span><br>주가가 힘을 모으고 있습니다. 곧 위든 아래든 튀어 오릅니다. (11/18일 TYRA 패턴)</div>"
                     else:
-                        rsi_msg = f"현재 {rsi_val:.1f} ➔ ⚪ **중립 구간 (일반적인 흐름)**"
-                        rsi_col = "#ccc"
+                        sq_html = f"<div class='diagnosis-box' style='border-left-color: #888'><span class='diag-title'>에너지:</span> 현재는 발산 중이거나 일반적인 구간입니다.</div>"
                     
-                    # 2. 거래량 진단
+                    st.markdown(sq_html, unsafe_allow_html=True)
+                    
+                    # 수급 진단
                     if whale_ratio >= 3.0:
-                        vol_msg = f"평소의 {whale_ratio:.1f}배 ➔ 🟣 **고래(세력)가 물량을 쓸어담거나 던지는 중! 방향성 주목**"
-                        vol_col = "#a29bfe"
+                        vol_msg = f"🟣 **고래 개입 확인!** (평소 {whale_ratio:.1f}배)"
                     elif whale_ratio >= 1.5:
-                        vol_msg = f"평소의 {whale_ratio:.1f}배 ➔ 🟡 **거래량이 살아나는 중**"
-                        vol_col = "#f1c40f"
+                        vol_msg = f"🟡 **매집 의심** (거래량 점증 중)"
                     else:
-                        vol_msg = f"평소와 비슷함 ({whale_ratio:.1f}배) ➔ ⚪ **특이사항 없음**"
-                        vol_col = "#ccc"
-
-                    # 3. 추세 진단
-                    if row['close'] > row['SMA20']:
-                        trend_msg = "현재가 > 20일선 ➔ 🟢 **상승 추세가 살아있음 (보유 관점)**"
-                        trend_col = "#00ff41"
-                    else:
-                        trend_msg = "현재가 < 20일선 ➔ 🔴 **하락 추세 진행 중 (방어적 대응 필요)**"
-                        trend_col = "#ff4757"
-
-                    st.markdown(f"""
-                    <div class='diagnosis-box' style='border-left-color: {rsi_col}'><span class='diag-title' style='color:{rsi_col}'>RSI 진단:</span> {rsi_msg}</div>
-                    <div class='diagnosis-box' style='border-left-color: {vol_col}'><span class='diag-title' style='color:{vol_col}'>수급 진단:</span> {vol_msg}</div>
-                    <div class='diagnosis-box' style='border-left-color: {trend_col}'><span class='diag-title' style='color:{trend_col}'>추세 진단:</span> {trend_msg}</div>
-                    """, unsafe_allow_html=True)
+                        vol_msg = "⚪ 특이사항 없음"
+                    
+                    st.markdown(f"**수급 분석:** {vol_msg}")
 
                 c_t, c_s = st.columns(2)
                 with c_t:
@@ -342,7 +307,7 @@ if run:
                 st.divider()
                 st.markdown("### 🧬 AI 심층 분석 리포트")
                 
-                indicators = {"trend": trend, "whale": whale}
+                indicators = {"trend": trend, "whale": whale, "squeeze": squeeze_msg}
                 with st.spinner("AI 리포트 작성 중..."):
                     report = run_deep_analysis(ticker, row['close'], score, indicators, "", fda_data, earnings)
                     st.markdown(report)
