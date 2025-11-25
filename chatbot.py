@@ -52,8 +52,14 @@ st.markdown("""
     .metric-title { font-size: 0.9rem; color: #888; font-weight: bold; } 
     .metric-value { font-size: 1.3rem; font-weight: bold; margin-top: 5px;}
     
-    /* 선행 지표 박스 */
-    .early-warning-box { background-color: #2d3436; border-left: 5px solid #0984e3; padding: 15px; margin-bottom: 10px; border-radius: 0 8px 8px 0; }
+    /* 선행 지표 박스 (복구됨!) */
+    .early-warning-box { 
+        background-color: #2d3436; 
+        border-left: 5px solid #0984e3; 
+        padding: 15px; 
+        margin-bottom: 10px; 
+        border-radius: 0 8px 8px 0; 
+    }
     .squeeze-on { color: #00cec9; font-weight: bold; animation: pulse 2s infinite; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
@@ -114,6 +120,7 @@ def calculate_quant_metrics(df):
     df['SMA20'] = df['close'].rolling(20).mean()
     df['VolAvg20'] = df['volume'].rolling(20).mean()
     
+    # 🔥 볼린저 밴드 & 스퀴즈 계산
     std = df['close'].rolling(20).std()
     df['Upper'] = df['SMA20'] + (std * 2)
     df['Lower'] = df['SMA20'] - (std * 2)
@@ -146,7 +153,6 @@ def draw_chart_k_style(df, ticker):
     """🇰🇷 K-Style 차트 (상승=빨강, 하락=파랑)"""
     df = df.iloc[-60:]
     
-    # 캔들 색상: 상승(빨강), 하락(파랑)
     colors = ['#ff4757' if c >= o else '#00a8ff' for c, o in zip(df['close'], df['open'])]
 
     fig = go.Figure()
@@ -268,7 +274,7 @@ if run:
         try:
             client = RESTClient(API_KEY)
             end = datetime.now(pytz.timezone("America/New_York"))
-            start = end - timedelta(days=80) 
+            start = end - timedelta(days=120) # 기간 넉넉히
             aggs = list(client.list_aggs(ticker, 1, "day", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), limit=50000))
             
             if not aggs:
@@ -288,13 +294,12 @@ if run:
                 score = get_ai_score(row)
                 grade = "S (강력매수)" if score >= 80 else "A (매수)" if score >= 60 else "B (중립)" if score >= 40 else "C (매도)"
                 
-                # 🇰🇷 K-Style 색상 지정 (빨강=좋음)
+                # K-Style 색상 (빨강=좋음)
                 score_col = "#ff4757" if score >= 60 else "#f1c40f" if score >= 40 else "#00a8ff"
                 
                 target = row['close'] + (row['ATR'] * 2)
                 cut = row['close'] - (row['ATR'] * 1.5)
                 
-                # 추세: 상승=빨강, 하락=파랑
                 is_up = row['close'] > row['SMA20']
                 trend = "📈 상승세" if is_up else "📉 하락세"
                 trend_col = "#ff4757" if is_up else "#00a8ff"
@@ -310,7 +315,6 @@ if run:
                     st.markdown(f"<div style='text-align:center'><span class='earnings-badge'>🚨 실적 {earnings['d_day']}</span></div>", unsafe_allow_html=True)
                 st.markdown(f"<h2 style='color:#fff'>${row['close']:.2f}</h2>", unsafe_allow_html=True)
                 
-                # 점수판 (빨강맛)
                 st.markdown(f"<div class='big-score' style='color:{score_col}; text-shadow: 0 0 20px {score_col}'>{score}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='text-align:center'><span class='grade-badge' style='border: 2px solid {score_col}; color:{score_col}'>{grade}</span></div>", unsafe_allow_html=True)
 
@@ -326,8 +330,19 @@ if run:
                     wh_col = "#d63031" if "일반" in whale else "#a29bfe"
                     st.markdown(f"""<div class='signal-card'><div class='metric-title'>거래량 (VOLUME)</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
 
+                # ==========================================
+                # [🔥 복구된 선행 매매 신호 박스]
+                # ==========================================
+                with st.expander("🔍 선행 매매 신호 (Early Warning)", expanded=True):
+                    if is_squeeze:
+                        st.markdown(f"<div class='early-warning-box'><span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈 감지!</span><br>에너지가 모였습니다. 곧 크게 터집니다.</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"<div style='color:#888; padding:10px;'>✔️ 볼린저 밴드: 일반적인 등락 구간입니다.</div>", unsafe_allow_html=True)
+                    
+                    if whale_ratio >= 3.0:
+                        st.markdown(f"<div style='color:#a29bfe; font-weight:bold; padding:10px;'>🟣 고래 수급 포착! (평소의 {whale_ratio:.1f}배)</div>", unsafe_allow_html=True)
+
                 c_t, c_s = st.columns(2)
-                # 타겟=빨강, 손절=파랑
                 with c_t:
                     st.markdown(f"<div class='target-box'><div>1차 익절가 (Target)</div><div style='font-size:1.4rem; font-weight:bold'>${target:.2f}</div></div>", unsafe_allow_html=True)
                 with c_s:
