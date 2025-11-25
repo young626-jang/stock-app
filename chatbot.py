@@ -1,56 +1,76 @@
 import streamlit as st
 from polygon import RESTClient
 from datetime import datetime, timedelta
-from collections import defaultdict
+import pandas as pd
+import numpy as np
 import google.generativeai as genai
-import pytz
 import requests
 import re
 import yfinance as yf
-import time  # 👈 번역 시 API 충돌 방지용 대기시간 추가
+import pytz
+import time
 
 # ==========================================
-# [1] UI 및 모바일 최적화 설정
+# [1] UI: 사이버펑크 퀀트 스타일
 # ==========================================
 st.set_page_config(
-    page_title="세력 탐지기 Ultimate",
-    page_icon="📡",
+    page_title="QUANTUM AI TERMINAL",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
     <style>
+    /* 전체 테마: 블랙 & 네온 */
+    .stApp { background-color: #050505; color: #e0e0e0; }
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
-    .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 5rem !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+    
+    /* 폰트 & 타이포그래피 */
+    h1, h2, h3, h4 { font-family: 'Courier New', monospace; color: #fff; text-align: center; }
+    
+    /* 점수판 */
+    .big-score {
+        font-size: 5rem; font-weight: 900; color: #00ff41; 
+        text-align: center; text-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
+        line-height: 1.1; margin-top: 10px;
     }
+    .grade-badge {
+        font-size: 1.5rem; font-weight: bold; padding: 5px 15px;
+        border: 2px solid #00ff41; border-radius: 5px; color: #00ff41;
+        display: inline-block; margin-bottom: 20px;
+    }
+
+    /* 카드 디자인 */
+    .signal-card {
+        background-color: #111; border: 1px solid #333; border-radius: 8px;
+        padding: 15px; margin-bottom: 15px;
+    }
+    .metric-title { font-size: 0.8rem; color: #888; text-transform: uppercase; }
+    .metric-value { font-size: 1.2rem; font-weight: bold; color: #fff; }
+    
+    /* 매크로 바 */
+    .macro-bar {
+        background-color: #0a0a0a; border-bottom: 1px solid #333;
+        padding: 8px; text-align: center; font-size: 0.85rem; color: #ff9f43;
+        font-family: 'Courier New', monospace; margin-bottom: 20px;
+    }
+    
+    /* 가격 타겟 박스 */
+    .target-box { border: 1px solid #00ff41; color: #00ff41; padding: 10px; border-radius: 5px; text-align: center; background: rgba(0, 255, 65, 0.05); }
+    .stop-box { border: 1px solid #ff4b4b; color: #ff4b4b; padding: 10px; border-radius: 5px; text-align: center; background: rgba(255, 75, 75, 0.05); }
+
+    /* 실적 배지 */
+    .earnings-badge { background-color: #ff4757; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+
+    /* 버튼 */
     .stButton > button {
-        width: 100%;
-        border-radius: 12px;
-        height: 3.5em;
-        font-weight: bold;
-        font-size: 1rem;
+        width: 100%; background-color: #003300; color: #00ff41;
+        border: 1px solid #00ff41; height: 3.5em; font-weight: bold;
+        transition: all 0.3s;
     }
-    div[data-testid="stMetric"] {
-        background-color: #f8f9fa;
-        padding: 10px;
-        border-radius: 10px;
-        text-align: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .d-day-badge {
-        background-color: #ff4b4b; 
-        color: white; 
-        padding: 3px 8px; 
-        border-radius: 6px; 
-        font-size: 0.8rem; 
-        font-weight: bold;
-    }
+    .stButton > button:hover { background-color: #00ff41; color: black; box-shadow: 0 0 15px #00ff41; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -62,295 +82,277 @@ try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     PERPLEXITY_API_KEY = st.secrets["PERPLEXITY_API_KEY"]
     FDA_API_KEY = st.secrets["FDA_API_KEY"]
-except (FileNotFoundError, KeyError):
-    st.error("🚨 API 키 설정 오류! secrets.toml 파일을 확인하세요.")
+except:
+    st.error("🚨 API KEY MISSING")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# [3] 핵심 유틸리티 함수
+# [3] 퀀트 엔진: 수학적 지표 계산
 # ==========================================
+def calculate_quant_metrics(df):
+    """RSI, MACD, ATR, OBV 등 핵심 지표 계산"""
+    # RSI (14)
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # MACD
+    exp12 = df['close'].ewm(span=12, adjust=False).mean()
+    exp26 = df['close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = exp12 - exp26
+    df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    
+    # ATR (변동성) - 손절/익절가 계산용
+    high_low = df['high'] - df['low']
+    high_close = np.abs(df['high'] - df['close'].shift())
+    low_close = np.abs(df['low'] - df['close'].shift())
+    df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
+    
+    # 이동평균 및 거래량
+    df['SMA20'] = df['close'].rolling(20).mean()
+    df['VolAvg20'] = df['volume'].rolling(20).mean()
+    df['OBV'] = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
+    
+    return df.iloc[-1] # 마지막 봉 반환
 
-@st.cache_data
-def get_ticker_info(ticker, _client):
+def get_ai_score(row):
+    """지표 기반 0~100점 점수 산출"""
+    score = 50
+    # 추세
+    if row['close'] > row['SMA20']: score += 15
+    else: score -= 10
+    # 모멘텀
+    if 50 <= row['RSI'] <= 70: score += 15
+    elif row['RSI'] > 75: score -= 5 (과매수)
+    elif row['RSI'] < 30: score += 20 (과매도 반등)
+    # 에너지
+    if row['MACD'] > row['Signal']: score += 15
+    # 수급
+    vol_ratio = row['volume'] / row['VolAvg20']
+    if vol_ratio > 3.0: score += 20
+    elif vol_ratio > 1.5: score += 10
+    
+    return min(100, max(0, int(score)))
+
+def get_macro_ticker():
+    """상단 흐르는 매크로 데이터"""
     try:
-        details = _client.get_ticker_details(ticker)
-        name = details.name
-        industry = getattr(details, "sic_description", "").upper()
-        bio_keywords = ["PHARMA", "BIO", "DRUG", "MEDICAL", "SURGICAL", "LIFE", "HEALTH", "THERAP"]
-        is_bio = any(k in industry for k in bio_keywords) or any(k in name.upper() for k in bio_keywords)
-        return {"name": name, "industry": industry if industry else "General", "is_bio": is_bio}
-    except:
-        return {"name": ticker, "industry": "Unknown", "is_bio": False}
+        data = yf.download(['^TNX', '^VIX', 'CL=F', 'GC=F'], period='1d', progress=False)['Close'].iloc[-1]
+        tnx = data['^TNX'].item() if hasattr(data['^TNX'], 'item') else data['^TNX']
+        vix = data['^VIX'].item() if hasattr(data['^VIX'], 'item') else data['^VIX']
+        return f"US10Y: {tnx:.2f}% | VIX: {vix:.2f} | WTI: ${data['CL=F']:.1f} | GOLD: ${data['GC=F']:.0f}"
+    except: return "MARKET DATA LOADING..."
+
+# ==========================================
+# [4] 인텔리전스 엔진: 데이터 수집 & AI
+# ==========================================
+@st.cache_data
+def get_ticker_details(ticker, _client):
+    try:
+        d = _client.get_ticker_details(ticker)
+        ind = getattr(d, "sic_description", "").upper()
+        name = d.name
+        is_bio = any(x in ind+name.upper() for x in ["PHARMA", "BIO", "DRUG", "MED", "LIFE"])
+        return {"name": name, "is_bio": is_bio}
+    except: return {"name": ticker, "is_bio": False}
 
 @st.cache_data
-def get_earnings_info(ticker):
-    earnings_date = None
-    source = ""
+def get_earnings_schedule(ticker):
+    """3중 백업 실적 조회"""
     try:
         stock = yf.Ticker(ticker)
+        # 1. Calendar
         try:
             cal = stock.calendar
-            if cal and isinstance(cal, dict) and 'Earnings Date' in cal:
-                earnings_date = cal['Earnings Date'][0]
+            if cal and 'Earnings Date' in cal: return calc_d_day(cal['Earnings Date'][0])
         except: pass
-
-        if not earnings_date:
-            try:
-                today_ts = datetime.now()
-                df = stock.get_earnings_dates(limit=8)
-                future = df[df.index > today_ts].sort_index()
-                if not future.empty: earnings_date = future.index[0]
-            except: pass
-        if earnings_date: source = "Yahoo"
-    except: pass
-
-    if not earnings_date:
+        # 2. Earnings Dates
         try:
-            url = "https://api.perplexity.ai/chat/completions"
-            headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-            prompt = f"Find the next confirmed earnings release date for {ticker}. Output ONLY the date in YYYY-MM-DD format."
-            payload = {"model": "sonar", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
-            res = requests.post(url, json=payload, headers=headers, timeout=5)
-            if res.status_code == 200:
-                match = re.search(r'\d{4}-\d{2}-\d{2}', res.json()["choices"][0]["message"]["content"])
-                if match:
-                    earnings_date = datetime.strptime(match.group(0), "%Y-%m-%d").date()
-                    source = "AI Search"
+            df = stock.get_earnings_dates(limit=10)
+            future = df[df.index > datetime.now()].sort_index()
+            if not future.empty: return calc_d_day(future.index[0])
         except: pass
-
-    if earnings_date:
-        if isinstance(earnings_date, datetime): e_date = earnings_date.date()
-        else: e_date = earnings_date
-        days_left = (e_date - datetime.now().date()).days
-        d_str = "D-Day" if days_left == 0 else f"D-{days_left}" if days_left > 0 else "완료"
-        return {"date": e_date.strftime("%Y-%m-%d"), "d_day": d_str, "days_left": days_left, "source": source}
-    return {"date": "미정", "d_day": "-", "days_left": 999, "source": "-"}
-
-def get_clean_name(name):
-    name = re.sub(r'[,.]', '', name)
-    remove = ['Inc', 'Corp', 'Corporation', 'Ltd', 'PLC', 'Group', 'Holdings', 'Therapeutics', 'Pharma']
-    for word in remove: name = re.sub(r'\b' + word + r'\b', '', name, flags=re.IGNORECASE)
-    return name.strip()
-
-def get_fda_data(company_name):
-    """FDA 데이터 조회 (영어 원본 반환)"""
-    clean_name = get_clean_name(company_name)
-    query = clean_name.replace(" ", "+")
-    url = f"https://api.fda.gov/drug/enforcement.json?api_key={FDA_API_KEY}&search=openfda.manufacturer_name:{query}&limit=3&sort=report_date:desc"
-    try:
-        res = requests.get(url, timeout=3)
-        if res.status_code == 200:
-            results = res.json().get('results', [])
-            if results:
-                summary = []
-                for r in results:
-                    # 너무 길면 자르기 (번역 비용 절감)
-                    reason = r.get('reason_for_recall','')[:200]
-                    summary.append(f"• {r.get('report_date','-')} ({r.get('status','-')})\n  └ {reason}...")
-                return "\n".join(summary)
-            return "✅ 최근 리콜/제재 이력 없음"
-        return "ℹ️ FDA 데이터 없음"
-    except: return "❌ FDA 서버 연결 실패"
-
-def translate_to_korean(text):
-    """Gemini를 이용한 한글 번역 (강력 모드)"""
-    if not text or "없음" in text or "실패" in text: 
-        return text
+    except: pass
     
-    # 0.5초 대기 (이전 API 호출과 겹치지 않게)
-    time.sleep(0.5)
+    # 3. AI Search (Perplexity) - 최후의 수단
+    try:
+        url = "https://api.perplexity.ai/chat/completions"
+        h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
+        msg = [{"role":"user", "content":f"Find next earnings date for {ticker}. Output YYYY-MM-DD only."}]
+        res = requests.post(url, json={"model":"sonar","messages":msg,"temperature":0.1}, headers=h, timeout=4)
+        match = re.search(r'\d{4}-\d{2}-\d{2}', res.json()['choices'][0]['message']['content'])
+        if match: return calc_d_day(datetime.strptime(match.group(0), "%Y-%m-%d").date())
+    except: pass
     
+    return {"d_day": "-", "date": "미정", "diff": 999}
+
+def calc_d_day(date_obj):
+    if isinstance(date_obj, datetime): date_obj = date_obj.date()
+    diff = (date_obj - datetime.now().date()).days
+    d_day = "D-Day" if diff == 0 else f"D-{diff}" if diff > 0 else "완료"
+    return {"d_day": d_day, "date": date_obj.strftime("%Y-%m-%d"), "diff": diff}
+
+def get_fda_data(name):
+    """FDA 데이터 조회 + 한글 번역"""
+    clean = re.sub(r'[,.]|Inc|Corp|Ltd', '', name).strip().replace(" ", "+")
+    url = f"https://api.fda.gov/drug/enforcement.json?api_key={FDA_API_KEY}&search=openfda.manufacturer_name:{clean}&limit=3&sort=report_date:desc"
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        
-        # 프롬프트를 구체적으로 변경 (포맷 유지 + 설명 번역)
-        prompt = f"""
-        You are a professional medical translator.
-        Translate the following FDA recall reasons into Korean.
-        
-        [Rules]
-        1. Keep the Date (e.g., 20231115) and Status (e.g., Terminated, Ongoing) exactly as is.
-        2. Translate ONLY the description part after the symbol '└'.
-        3. Use natural Korean suitable for investors.
-        4. Keep the bullet points (•) format.
+        r = requests.get(url, timeout=3).json()
+        if 'results' in r:
+            eng_text = "\n".join([f"• {x['report_date']}: {x['reason_for_recall'][:150]}..." for x in r['results']])
+            # Gemini 번역
+            try:
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                trans = model.generate_content(f"Translate FDA recall reasons to Korean naturally:\n{eng_text}").text
+                return trans
+            except: return eng_text # 번역 실패시 영어라도 반환
+        return "✅ FDA 리콜 이력 없음 (CLEAN)"
+    except: return "ℹ️ FDA 데이터 없음"
 
-        [Input Text]
-        {text}
-        """
-        
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        # 번역 실패 시 에러 메시지 표시
-        return f"⚠️ 번역 시스템 응답 지연 (영어 원본 표시):\n{text}"
-
-def analyze_with_gemini(prompt):
-    try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        return model.generate_content(prompt).text
-    except: return "Gemini 분석 실패"
-
-def run_hybrid_analysis(mode, system_data, fda_data, earnings_data):
-    e_warn = f"\n🚨 [주의] 실적 발표 {earnings_data['d_day']} 남음!" if earnings_data['days_left'] <= 7 and earnings_data['days_left'] >= 0 else ""
-    context = f"[FDA/임상 데이터]\n{fda_data}\n" if mode == "BIO" else ""
-    role = "바이오 전문 펀드매니저" if mode == "BIO" else "기술주 애널리스트"
-
-    prompt = f"""당신은 {role}입니다.
-
-[분석 데이터]
-{system_data}
-{context}
-[실적 일정]
-다음 발표: {earnings_data['date']} ({earnings_data['d_day']}) {e_warn}
-
-[지시사항]
-1. ⚠️ 실시간 웹 검색으로 최근 24시간 내 뉴스를 확인하세요.
-2. 🚫 면책 조항 금지. 분석 결과만 직설적으로 전달하세요.
-3. FDA 리콜이 있다면 그 심각성을 평가하세요.
-
-[출력 양식]
-## 📰 뉴스/팩트체크
-(최신 이슈 요약)
-
-## ⚠️ 핵심 리스크
-(악재, FDA, 실적 변동성 등)
-
-## 🎯 최종 판단
-(매수🟢 / 관망🟡 / 매도🔴) - (한 문장 이유)
-"""
+def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings):
+    """Perplexity 심층 리포트 생성"""
+    mode = "바이오" if fda and "FDA" in fda else "기술주"
+    warn = f"🚨실적발표 {earnings['d_day']} 전!" if earnings['diff'] <= 7 else ""
+    
+    prompt = f"""
+    [ROLE] 월스트리트 퀀트 펀드매니저
+    [TARGET] {ticker} (현재가: ${price})
+    
+    [QUANT SIGNAL]
+    - AI Score: {score}점
+    - 추세: {indicators['trend']}
+    - 수급: {indicators['whale']}
+    
+    [FUNDAMENTAL DATA]
+    - 실적일정: {earnings['date']} ({earnings['d_day']}) {warn}
+    - FDA/이슈: {fda}
+    
+    [MISSION]
+    1. 실시간 뉴스 검색(24h)으로 하락/상승 원인 파악.
+    2. 위 퀀트 데이터와 뉴스를 결합해 논리적 결론 도출.
+    3. 면책조항 절대 금지.
+    
+    [OUTPUT]
+    ## ⚡ 뉴스 & 팩트
+    (핵심만)
+    ## ⚠️ 리스크 분석
+    (실적, FDA, 수급 악재 등)
+    ## 🏛️ 최종 전략
+    (매수/관망/매도) - (이유 한줄)
+    """
     url = "https://api.perplexity.ai/chat/completions"
-    headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": "sonar",
-        "messages": [{"role": "system", "content": "You are a helpful financial assistant."}, {"role": "user", "content": prompt}],
-        "temperature": 0.2
-    }
-    try: return requests.post(url, json=payload, headers=headers).json()["choices"][0]["message"]["content"]
-    except Exception as e: return f"AI 분석 오류: {e}"
-
-def extract_signal(text):
-    text = text.lower()
-    if "🟢" in text or "매수" in text: return "매수 기회", "#d4edda", "#155724"
-    elif "🔴" in text or "매도" in text: return "위험/매도", "#f8d7da", "#721c24"
-    else: return "관망 필요", "#fff3cd", "#856404"
+    h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
+    try:
+        return requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":prompt}],"temperature":0.2}, headers=h).json()['choices'][0]['message']['content']
+    except: return "AI 분석 연결 실패"
 
 # ==========================================
-# [4] 메인 애플리케이션 로직
+# [5] 메인 애플리케이션
 # ==========================================
-if "chat_history" not in st.session_state: st.session_state.chat_history = []
-if "analysis_data" not in st.session_state: st.session_state.analysis_data = None
+# 1. 상단 매크로 바
+st.markdown(f"<div class='macro-bar'>{get_macro_ticker()}</div>", unsafe_allow_html=True)
 
-st.title("📡 미국 주식 세력 탐지기")
-st.caption("Auto-Mode + Earnings + Translated Data 🇰🇷")
+# 2. 검색창
+c1, c2 = st.columns([3, 1])
+ticker = c1.text_input("TICKER", value="IONQ", label_visibility="collapsed").upper().strip()
+run = c2.button("SYSTEM SCAN 🚀")
 
-col_input, col_btn = st.columns([2, 1])
-ticker = col_input.text_input("티커 입력", value="IONQ", label_visibility="collapsed").upper().strip()
-run_btn = col_btn.button("분석 실행 🚀", type="primary", use_container_width=True)
-
-if run_btn:
-    with st.spinner(f"[{ticker}] 데이터 채굴 및 AI 번역 중..."):
+if run:
+    with st.spinner("QUANTUM ENGINE: ANALYZING DATA STREAMS..."):
         try:
             client = RESTClient(API_KEY)
-            info = get_ticker_info(ticker, client)
-            earnings = get_earnings_info(ticker)
-            mode = "BIO" if info['is_bio'] else "GENERAL"
-            company_name = info['name']
-
-            end_dt = datetime.now(pytz.timezone("America/New_York"))
-            start_dt = end_dt - timedelta(days=14)
-            aggs = list(client.list_aggs(ticker, 1, "minute", start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), limit=50000))
-
+            
+            # A. 데이터 수집 (Polygon)
+            end = datetime.now(pytz.timezone("America/New_York"))
+            start = end - timedelta(days=60)
+            aggs = list(client.list_aggs(ticker, 1, "day", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), limit=50000))
+            
             if not aggs:
-                st.error(f"❌ '{ticker}' 데이터를 찾을 수 없습니다.")
+                st.error("DATA NOT FOUND")
             else:
-                current_price = aggs[-1].close
-                total_vol = sum(a.volume for a in aggs)
-                total_pv = sum(((a.high+a.low+a.close)/3)*a.volume for a in aggs)
-                vwap = total_pv/total_vol if total_vol else 0
-                price_vol = defaultdict(int)
-                for a in aggs: price_vol[round(a.close, 1)] += a.volume
-                support = max(price_vol, key=price_vol.get)
-                diff = ((current_price - vwap)/vwap)*100
-
-                # FDA 데이터 수집 및 번역 (바이오 모드일 때만)
-                fda_info_eng = get_fda_data(company_name) if mode == "BIO" else "N/A"
-                # 한글 번역 수행
-                fda_info_kr = translate_to_korean(fda_info_eng) if mode == "BIO" and "없음" not in fda_info_eng else fda_info_eng
-
-                st.session_state.analysis_data = {
-                    "ticker": ticker, "name": company_name, "price": current_price, "mode": mode
-                }
-
-                # UI 표시
-                badge_bg = "#e6fffa" if mode == "BIO" else "#e6f7ff"
-                earnings_html = f"<span class='d-day-badge' style='margin-left:5px;'>🚨 실적 {earnings['d_day']}</span>" if earnings['days_left'] <= 7 and earnings['days_left'] >= 0 else ""
+                # B. 데이터 가공
+                df = pd.DataFrame(aggs)
+                df = df.rename(columns={'open':'open','high':'high','low':'low','close':'close','volume':'volume'})
+                row = calculate_quant_metrics(df) # 기술적 지표 계산 완료
                 
-                st.markdown(f"""
-                <div style='text-align:center; margin-bottom:15px;'>
-                    <span style='background-color:{badge_bg}; padding:5px 10px; border-radius:5px; font-weight:bold; color:#444;'>{mode} MODE</span>
-                    {earnings_html}
-                </div>
-                """, unsafe_allow_html=True)
-
-                c1, c2 = st.columns(2)
-                c1.metric("현재가", f"${current_price}")
-                c2.metric("세력평단", f"${vwap:.2f}", f"{diff:.1f}%")
-                c3, c4 = st.columns(2)
-                c3.metric("지지선", f"${support}")
-                c4.metric("실적발표", f"{earnings['d_day']}", f"{earnings['date']}")
-
-                # AI 분석
-                sys_data = f"종목: {ticker}, 가격: {current_price}, VWAP: {vwap:.2f}, 지지선: {support}"
-                gemini_res = analyze_with_gemini(f"기술적 분석 요약:\n{sys_data}")
-                sys_data_full = f"{sys_data}\n[Gemini 의견]: {gemini_res}"
-                # 분석에는 영어 데이터를 넘깁니다 (정확도)
-                ai_report = run_hybrid_analysis(mode, sys_data_full, fda_info_eng, earnings)
-
-                sig_text, bg, txt = extract_signal(ai_report)
-                st.markdown(f"""
-                <div style="background-color:{bg}; padding:15px; border-radius:12px; text-align:center; margin:20px 0; border:1px solid {txt}; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                    <h2 style="color:{txt}; margin:0; font-size:1.6rem;">{sig_text}</h2>
-                </div>
-                """, unsafe_allow_html=True)
-
-                with st.expander("📊 AI 상세 분석 리포트", expanded=False):
-                    st.markdown(ai_report)
+                # C. 인텔리전스 수집
+                info = get_ticker_details(ticker, client)
+                earnings = get_earnings_schedule(ticker)
+                fda_data = get_fda_data(info['name']) if info['is_bio'] else ""
                 
-                if mode == "BIO":
-                    with st.expander("💊 FDA 리콜/제재 데이터 (한글 번역됨)", expanded=False):
-                        # 여기에 번역된 한글 데이터를 표시
-                        st.markdown(fda_info_kr)
+                # D. 점수 및 전략 계산
+                score = get_ai_score(row)
+                grade = "S (강력매수)" if score >= 80 else "A (매수)" if score >= 60 else "B (중립)" if score >= 40 else "C (매도)"
+                score_col = "#00ff41" if score >= 60 else "#f1c40f" if score >= 40 else "#ff4757"
+                
+                # 목표가/손절가 (ATR 기반)
+                target = row['close'] + (row['ATR'] * 2)
+                cut = row['close'] - (row['ATR'] * 1.5)
+                
+                # 텍스트화
+                trend = "📈 상승세" if row['close'] > row['SMA20'] else "📉 하락세"
+                whale = f"🐋 고래출현 ({row['volume']/row['VolAvg20']:.1f}x)" if row['volume'] > row['VolAvg20']*3 else "일반 수급"
+                
+                # ================= UI 출력 =================
+                
+                # 1. 헤더 (가격 + 실적배지)
+                st.markdown(f"<h1 style='margin:0'>{ticker}</h1>", unsafe_allow_html=True)
+                if earnings['diff'] <= 7:
+                    st.markdown(f"<div style='text-align:center'><span class='earnings-badge'>🚨 실적 {earnings['d_day']}</span></div>", unsafe_allow_html=True)
+                st.markdown(f"<h2>${row['close']:.2f}</h2>", unsafe_allow_html=True)
+                
+                # 2. 점수판
+                st.markdown(f"<div class='big-score' style='color:{score_col}'>{score}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='text-align:center'><span class='grade-badge' style='border-color:{score_col}; color:{score_col}'>{grade}</span></div>", unsafe_allow_html=True)
+                
+                # 3. 퀀트 데이터 그리드
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>TREND</div><div class='metric-value' style='color:{'#00ff41' if '상승' in trend else '#ff4757'}'>{trend}</div></div>""", unsafe_allow_html=True)
+                with c2:
+                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>RSI (14)</div><div class='metric-value'>{row['RSI']:.1f}</div></div>""", unsafe_allow_html=True)
+                with c3:
+                    wh_col = "#d63031" if "일반" in whale else "#a29bfe"
+                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>VOLUME</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
 
-                st.session_state.chat_history.append({"role": "assistant", "content": f"**[{ticker}] 분석결과**\n{sig_text}\n\n{ai_report}"})
+                # 4. 타겟/손절가
+                c_t, c_s = st.columns(2)
+                with c_t:
+                    st.markdown(f"<div class='target-box'><div>TARGET (R1)</div><div style='font-size:1.4rem; font-weight:bold'>${target:.2f}</div></div>", unsafe_allow_html=True)
+                with c_s:
+                    st.markdown(f"<div class='stop-box'><div>STOP LOSS (S1)</div><div style='font-size:1.4rem; font-weight:bold'>${cut:.2f}</div></div>", unsafe_allow_html=True)
+
+                # 5. AI 심층 리포트 (하단 배치)
+                st.divider()
+                st.markdown("### 🧬 DEEP DIVE ANALYSIS")
+                
+                indicators = {"trend": trend, "whale": whale}
+                with st.spinner("AI WRITING REPORT..."):
+                    report = run_deep_analysis(ticker, row['close'], score, indicators, "", fda_data, earnings)
+                    st.info(report)
+                    
+                    if info['is_bio']:
+                        with st.expander("💊 FDA RAW DATA (번역본)", expanded=False):
+                            st.write(fda_data)
 
         except Exception as e:
-            st.error(f"분석 중 오류 발생: {e}")
+            st.error(f"SYSTEM ERROR: {e}")
 
 # ==========================================
-# [5] 채팅 섹션
+# [6] 채팅 (하단 고정)
 # ==========================================
 st.divider()
-st.subheader("💬 AI 투자 자문")
-
-msgs = st.session_state.chat_history[-2:] if len(st.session_state.chat_history) > 2 else st.session_state.chat_history
-for msg in msgs:
-    with st.chat_message(msg["role"]): st.markdown(msg["content"])
-
-if q := st.chat_input("질문 입력"):
-    st.session_state.chat_history.append({"role": "user", "content": q})
+if q := st.chat_input("Ask AI Analyst..."):
     with st.chat_message("user"): st.write(q)
-    
     with st.chat_message("assistant"):
-        with st.spinner("실시간 검색 중..."):
-            ctx = f"[종목:{st.session_state.analysis_data['ticker']}]" if st.session_state.analysis_data else ""
-            prompt = f"데이터: {ctx}\n질문: {q}\n지시: 최신뉴스기반, 면책조항금지, 짧게답변."
-            h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-            d = {"model": "sonar", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+        with st.spinner("Searching..."):
             try:
-                res = requests.post("https://api.perplexity.ai/chat/completions", json=d, headers=h).json()
-                ans = res["choices"][0]["message"]["content"]
-                st.markdown(ans)
-                st.session_state.chat_history.append({"role": "assistant", "content": ans})
-            except: st.error("응답 실패")
+                url = "https://api.perplexity.ai/chat/completions"
+                h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
+                res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":f"질문: {q} (주식관련, 짧게, 면책조항X)"}],"temperature":0.1}, headers=h).json()
+                st.write(res['choices'][0]['message']['content'])
+            except: st.error("Chat Error")
