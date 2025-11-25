@@ -1,7 +1,9 @@
 streamlit
 polygon-api-client
 google-generativeai
-pillow
-pytz
-requests
 yfinance
+pandas
+numpy
+requests
+plotly
+pytz
