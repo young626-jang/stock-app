@@ -42,13 +42,23 @@ st.markdown("""
     }
     .stTextInput input::placeholder { color: #888 !important; }
 
-    .stChatInput { background-color: #050505 !important; }
-    .stChatInput input {
-        color: #fff !important;
+    /* Chat input 강제 스타일링 - 모든 선택자 조합 */
+    .stChatInput,
+    .stChatInput > div,
+    .stChatInput > div > div,
+    .stChatInput input,
+    [data-testid="stChatInput"],
+    [data-testid="stChatInput"] input,
+    div[class*="chat"] input {
         background-color: #1a1a1a !important;
+        color: #fff !important;
         border-color: #333 !important;
     }
-    .stChatInput input::placeholder { color: #888 !important; }
+
+    .stChatInput input::placeholder,
+    [data-testid="stChatInput"] input::placeholder {
+        color: #888 !important;
+    }
 
     input {
         color: #fff !important;
