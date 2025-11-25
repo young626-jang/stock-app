@@ -235,10 +235,20 @@ def draw_chart_k_style(df, ticker, height=400):
 
 def get_macro_ticker():
     try:
-        data = yf.download(['^TNX', '^VIX', 'CL=F', 'GC=F'], period='1d', progress=False)['Close'].iloc[-1]
-        tnx = data['^TNX'].item() if hasattr(data['^TNX'], 'item') else data['^TNX']
-        vix = data['^VIX'].item() if hasattr(data['^VIX'], 'item') else data['^VIX']
-        return f"국채10년: {tnx:.2f}% | VIX: {vix:.2f} | 유가: ${data['CL=F']:.1f} | 금: ${data['GC=F']:.0f}"
+        # 각 지표를 개별 다운로드
+        tnx_data = yf.download('^TNX', period='1d', progress=False)['Close'].iloc[-1]
+        tnx = float(tnx_data) if not pd.isna(tnx_data) else 0.0
+
+        vix_data = yf.download('^VIX', period='1d', progress=False)['Close'].iloc[-1]
+        vix = float(vix_data) if not pd.isna(vix_data) else 0.0
+
+        cl_data = yf.download('CL=F', period='1d', progress=False)['Close'].iloc[-1]
+        cl = float(cl_data) if not pd.isna(cl_data) else 0.0
+
+        gc_data = yf.download('GC=F', period='1d', progress=False)['Close'].iloc[-1]
+        gc = float(gc_data) if not pd.isna(gc_data) else 0.0
+
+        return f"국채10년: {tnx:.2f}% | VIX: {vix:.2f} | 유가: ${cl:.1f} | 금: ${gc:.0f}"
     except: return "매크로 로딩 중..."
 
 @st.cache_data
