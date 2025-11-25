@@ -9,6 +9,7 @@ import re
 import yfinance as yf
 import pytz
 import time
+import plotly.graph_objects as go # 👈 차트 기능을 위해 추가됨
 
 # ==========================================
 # [1] UI: 사이버펑크 퀀트 스타일
@@ -30,25 +31,15 @@ st.markdown("""
     h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; }
     h2, h3 { font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }
     
-    .big-score { font-size: 5rem; font-weight: 900; color: #00ff41; text-align: center; line-height: 1.1; margin-top: 10px; }
+    .big-score { font-size: 5rem; font-weight: 900; color: #00ff41; text-align: center; text-shadow: 0 0 20px rgba(0, 255, 65, 0.5); line-height: 1.1; margin-top: 10px; }
     .grade-badge { font-size: 1.5rem; font-weight: bold; padding: 5px 15px; border: 2px solid #00ff41; border-radius: 5px; color: #00ff41; display: inline-block; margin-bottom: 20px; }
-
     .signal-card { background-color: #111; border: 1px solid #333; border-radius: 8px; padding: 15px; margin-bottom: 15px; }
     .metric-title { font-size: 0.9rem; color: #aaa; font-weight: bold; } 
     .metric-value { font-size: 1.2rem; font-weight: bold; color: #fff; margin-top: 5px;}
     
-    /* 선행 지표 박스 (NEW) */
-    .early-warning-box {
-        background-color: #2d3436; border-left: 5px solid #0984e3;
-        padding: 15px; margin-bottom: 10px; border-radius: 0 8px 8px 0;
-    }
+    .early-warning-box { background-color: #2d3436; border-left: 5px solid #0984e3; padding: 15px; margin-bottom: 10px; border-radius: 0 8px 8px 0; }
     .squeeze-on { color: #00cec9; font-weight: bold; animation: pulse 2s infinite; }
-    
-    @keyframes pulse {
-        0% { opacity: 1; }
-        50% { opacity: 0.5; }
-        100% { opacity: 1; }
-    }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
     .macro-bar { background-color: #0a0a0a; border-bottom: 1px solid #333; padding: 8px; text-align: center; font-size: 0.9rem; color: #ff9f43; font-family: 'Courier New', monospace; margin-bottom: 20px; font-weight: bold; }
     .target-box { border: 1px solid #00ff41; color: #00ff41; padding: 10px; border-radius: 5px; text-align: center; background: rgba(0, 255, 65, 0.05); }
@@ -72,7 +63,7 @@ except:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# [3] 퀀트 엔진 (볼린저 밴드 추가)
+# [3] 퀀트 엔진
 # ==========================================
 def calculate_quant_metrics(df):
     delta = df['close'].diff()
@@ -81,51 +72,86 @@ def calculate_quant_metrics(df):
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # MACD
     exp12 = df['close'].ewm(span=12, adjust=False).mean()
     exp26 = df['close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = exp12 - exp26
     df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     
-    # ATR
     high_low = df['high'] - df['low']
     high_close = np.abs(df['high'] - df['close'].shift())
     low_close = np.abs(df['low'] - df['close'].shift())
     df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
     
-    # SMA & Volume
     df['SMA20'] = df['close'].rolling(20).mean()
     df['VolAvg20'] = df['volume'].rolling(20).mean()
     
-    # 🔥 볼린저 밴드 & 스퀴즈 (선행 지표)
     std = df['close'].rolling(20).std()
     df['Upper'] = df['SMA20'] + (std * 2)
     df['Lower'] = df['SMA20'] - (std * 2)
-    # 밴드폭(Bandwidth)이 좁을수록 에너지 응축
     df['Bandwidth'] = (df['Upper'] - df['Lower']) / df['SMA20']
     
-    return df.iloc[-1]
+    df['OBV'] = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
+    
+    return df
 
 def get_ai_score(row):
     score = 50
     if row['close'] > row['SMA20']: score += 15
     else: score -= 10
-    
     if 50 <= row['RSI'] <= 70: score += 15
     elif row['RSI'] > 75: score -= 5
     elif row['RSI'] < 30: score += 20
-    
     if row['MACD'] > row['Signal']: score += 15
-    
     vol_ratio = row['volume'] / row['VolAvg20']
     if vol_ratio > 3.0: score += 20
     elif vol_ratio > 1.5: score += 10
-    
-    # 스퀴즈 가산점
     if row['Bandwidth'] < 0.10: score += 10 
-    
     return min(100, max(0, int(score)))
 
+def draw_chart(df, ticker):
+    """Plotly를 이용한 수급/고래 차트 그리기"""
+    # 최근 60일 데이터만 사용
+    df = df.iloc[-60:]
+    
+    # 캔들 색상 결정 (상승: 초록, 하락: 빨강)
+    colors = ['#00ff41' if c >= o else '#ff4757' for c, o in zip(df['close'], df['open'])]
+
+    fig = go.Figure()
+
+    # 1. 거래량 바 (수급)
+    fig.add_trace(go.Bar(
+        x=df['timestamp'], 
+        y=df['volume'],
+        marker_color=colors,
+        name='거래량'
+    ))
+
+    # 2. 고래 감지선 (20일 평균 거래량)
+    fig.add_trace(go.Scatter(
+        x=df['timestamp'],
+        y=df['VolAvg20'],
+        mode='lines',
+        line=dict(color='#a29bfe', width=3, dash='dot'),
+        name='세력 기준선 (20일평균)'
+    ))
+    
+    # 차트 레이아웃 (다크모드)
+    fig.update_layout(
+        title=dict(text=f"🐳 {ticker} 수급 레이더 (Whale Radar)", font=dict(color="white", size=20)),
+        paper_bgcolor='#111',
+        plot_bgcolor='#111',
+        font=dict(color='white'),
+        height=400,
+        margin=dict(l=20, r=20, t=40, b=20),
+        xaxis=dict(showgrid=False, color='#888'),
+        yaxis=dict(showgrid=True, gridcolor='#333', color='#888'),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    return fig
+
+# ... (기존 API 및 매크로 함수 동일) ...
 def get_macro_ticker():
     try:
         data = yf.download(['^TNX', '^VIX', 'CL=F', 'GC=F'], period='1d', progress=False)['Close'].iloc[-1]
@@ -134,9 +160,6 @@ def get_macro_ticker():
         return f"국채10년: {tnx:.2f}% | VIX: {vix:.2f} | 유가: ${data['CL=F']:.1f} | 금: ${data['GC=F']:.0f}"
     except: return "매크로 데이터 로딩 중..."
 
-# ==========================================
-# [4] 인텔리전스 엔진
-# ==========================================
 @st.cache_data
 def get_ticker_details(ticker, _client):
     try:
@@ -149,6 +172,7 @@ def get_ticker_details(ticker, _client):
 
 @st.cache_data
 def get_earnings_schedule(ticker):
+    # (기존 실적 로직 동일)
     try:
         stock = yf.Ticker(ticker)
         try:
@@ -178,6 +202,7 @@ def calc_d_day(date_obj):
     return {"d_day": d_day, "date": date_obj.strftime("%Y-%m-%d"), "diff": diff}
 
 def get_fda_data(name):
+    # (기존 FDA 로직 동일)
     clean = re.sub(r'[,.]|Inc|Corp|Ltd', '', name).strip().replace(" ", "+")
     url = f"https://api.fda.gov/drug/enforcement.json?api_key={FDA_API_KEY}&search=openfda.manufacturer_name:{clean}&limit=3&sort=report_date:desc"
     try:
@@ -186,19 +211,19 @@ def get_fda_data(name):
             eng_text = "\n".join([f"• {x['report_date']}: {x['reason_for_recall'][:150]}..." for x in r['results']])
             try:
                 model = genai.GenerativeModel("gemini-1.5-flash")
-                trans = model.generate_content(f"Translate FDA recall reasons to Korean naturally:\n{eng_text}").text
-                return trans
+                return model.generate_content(f"Translate FDA recall reasons to Korean naturally:\n{eng_text}").text
             except: return eng_text
         return "✅ FDA 리콜 이력 없음 (CLEAN)"
     except: return "ℹ️ FDA 데이터 없음"
 
 def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings):
+    # (기존 AI 로직 동일)
     mode = "바이오" if fda and "FDA" in fda else "기술주"
     warn = f"🚨실적발표 {earnings['d_day']} 전!" if earnings['diff'] <= 7 else ""
     prompt = f"""
     [ROLE] 월스트리트 퀀트 펀드매니저
     [TARGET] {ticker} (현재가: ${price})
-    [QUANT] Score: {score}, 추세: {indicators['trend']}, 수급: {indicators['whale']}, 스퀴즈여부: {indicators['squeeze']}
+    [QUANT] Score: {score}, 추세: {indicators['trend']}, 수급: {indicators['whale']}, 스퀴즈: {indicators['squeeze']}
     [DATA] 실적: {earnings['date']} ({earnings['d_day']}) {warn}, FDA: {fda}
     [MISSION] 실시간 뉴스(24h) 결합 분석. 면책조항 금지.
     [OUTPUT]
@@ -225,19 +250,23 @@ ticker = c1.text_input("TICKER", value="IONQ", label_visibility="collapsed").upp
 run = c2.button("시스템 스캔 시작 🚀")
 
 if run:
-    with st.spinner("AI 퀀트 엔진: 선행 지표 분석 중..."):
+    with st.spinner("AI 퀀트 엔진: 선행 지표 분석 및 차트 생성 중..."):
         try:
             client = RESTClient(API_KEY)
             end = datetime.now(pytz.timezone("America/New_York"))
-            start = end - timedelta(days=80) # 볼린저 밴드 계산 위해 기간 늘림
+            start = end - timedelta(days=80) 
             aggs = list(client.list_aggs(ticker, 1, "day", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), limit=50000))
             
             if not aggs:
                 st.error("데이터를 찾을 수 없습니다.")
             else:
                 df = pd.DataFrame(aggs)
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms') # 타임스탬프 변환
                 df = df.rename(columns={'open':'open','high':'high','low':'low','close':'close','volume':'volume'})
-                row = calculate_quant_metrics(df)
+                
+                # 지표 계산 (전체 DF 사용)
+                df = calculate_quant_metrics(df)
+                row = df.iloc[-1]
                 
                 info = get_ticker_details(ticker, client)
                 earnings = get_earnings_schedule(ticker)
@@ -253,9 +282,7 @@ if run:
                 trend = "📈 상승세" if row['close'] > row['SMA20'] else "📉 하락세"
                 whale_ratio = row['volume']/row['VolAvg20']
                 whale = f"🐋 고래출현 ({whale_ratio:.1f}x)" if whale_ratio > 3.0 else "일반 수급"
-                
-                # 🔥 선행 지표 감지 (Squeeze)
-                is_squeeze = row['Bandwidth'] < 0.10 # 밴드폭이 10% 이내로 좁아짐
+                is_squeeze = row['Bandwidth'] < 0.10
                 squeeze_msg = "⚡ 에너지 응축 중 (폭발 임박!)" if is_squeeze else "일반 변동성 구간"
                 
                 # UI 출력
@@ -266,6 +293,11 @@ if run:
                 
                 st.markdown(f"<div class='big-score' style='color:{score_col}'>{score}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='text-align:center'><span class='grade-badge' style='border-color:{score_col}; color:{score_col}'>{grade}</span></div>", unsafe_allow_html=True)
+
+                # ==========================================
+                # [🔥 수급 차트 (Whale Radar) 표시]
+                # ==========================================
+                st.plotly_chart(draw_chart(df, ticker), use_container_width=True)
                 
                 c1, c2, c3 = st.columns(3)
                 with c1:
@@ -276,27 +308,14 @@ if run:
                     wh_col = "#d63031" if "일반" in whale else "#a29bfe"
                     st.markdown(f"""<div class='signal-card'><div class='metric-title'>거래량 (VOLUME)</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
 
-                # ==========================================
-                # [🔥 선행 매매 신호 박스]
-                # ==========================================
                 with st.expander("🔍 선행 매매 신호 (Early Warning)", expanded=True):
-                    # 스퀴즈 진단
                     if is_squeeze:
-                        sq_html = f"<div class='early-warning-box'><span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈 감지!</span><br>주가가 힘을 모으고 있습니다. 곧 위든 아래든 튀어 오릅니다. (11/18일 TYRA 패턴)</div>"
+                        st.markdown(f"<div class='early-warning-box'><span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈 감지!</span><br>곧 큰 변동성이 나옵니다.</div>", unsafe_allow_html=True)
                     else:
-                        sq_html = f"<div class='diagnosis-box' style='border-left-color: #888'><span class='diag-title'>에너지:</span> 현재는 발산 중이거나 일반적인 구간입니다.</div>"
+                        st.markdown(f"<div style='color:#888; padding:10px;'>✔️ 볼린저 밴드: 특이사항 없음</div>", unsafe_allow_html=True)
                     
-                    st.markdown(sq_html, unsafe_allow_html=True)
-                    
-                    # 수급 진단
                     if whale_ratio >= 3.0:
-                        vol_msg = f"🟣 **고래 개입 확인!** (평소 {whale_ratio:.1f}배)"
-                    elif whale_ratio >= 1.5:
-                        vol_msg = f"🟡 **매집 의심** (거래량 점증 중)"
-                    else:
-                        vol_msg = "⚪ 특이사항 없음"
-                    
-                    st.markdown(f"**수급 분석:** {vol_msg}")
+                        st.markdown(f"<div style='color:#a29bfe; font-weight:bold; padding:10px;'>🟣 고래 수급 포착! (평소의 {whale_ratio:.1f}배)</div>", unsafe_allow_html=True)
 
                 c_t, c_s = st.columns(2)
                 with c_t:
@@ -311,7 +330,6 @@ if run:
                 with st.spinner("AI 리포트 작성 중..."):
                     report = run_deep_analysis(ticker, row['close'], score, indicators, "", fda_data, earnings)
                     st.markdown(report)
-                    
                     if info['is_bio']:
                         with st.expander("💊 FDA 리콜 데이터 (한글 번역본)", expanded=False):
                             st.write(fda_data)
