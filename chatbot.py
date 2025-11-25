@@ -30,9 +30,9 @@ btn_border = "#555" if st.session_state.is_running else "#ff4757"
 
 st.markdown(f"""
     <style>
-    /* 전체 테마: 블랙 배경 */
-    .stApp {{ background-color: #050505; color: #e0e0e0; }}
-    
+    /* 전체 배경: 더 깊은 블랙 */
+    .stApp {{ background-color: #020202; color: #fff; }}
+
     /* 채팅 입력창 글씨색 검정으로 유지 */
     .stChatInput textarea {{
         color: #000000 !important;
@@ -43,7 +43,7 @@ st.markdown(f"""
 
     /* 일반 텍스트 흰색 */
     .stMarkdown, .stMarkdown p, .stMarkdown span {{ color: #fff !important; }}
-    
+
     /* 상단 입력창 어두운 테마 */
     .stTextInput input {{
         color: #fff !important;
@@ -54,7 +54,7 @@ st.markdown(f"""
     /* 폰트 & 타이포그래피 */
     h1 {{ font-family: 'Courier New', monospace; color: #fff; text-align: center; margin-bottom: 0px;}}
     h2, h3 {{ font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }}
-    
+
     /* 점수판 */
     .big-score {{
         font-size: clamp(2.5rem, 12vw, 6rem); font-weight: 900;
@@ -67,24 +67,48 @@ st.markdown(f"""
         border-radius: 5px; display: inline-block; margin-bottom: 20px;
     }}
 
-    /* 카드 디자인 */
-    .signal-card {{
-        background-color: #111; border: 1px solid #333; border-radius: 8px;
-        padding: 15px; margin-bottom: 15px; text-align: center;
+    /* 네온 카드 (박스 자체가 빛나는 효과) */
+    .neon-card {{
+        background-color: rgba(20, 20, 20, 0.8);
+        border: 1px solid currentColor;
+        border-radius: 12px;
+        padding: 15px;
+        text-align: center;
+        margin-bottom: 15px;
+        box-shadow: 0 0 10px currentColor, inset 0 0 5px currentColor;
+        transition: transform 0.3s ease;
     }}
-    .metric-title {{ font-size: 0.9rem; color: #888; font-weight: bold; }} 
-    .metric-value {{ font-size: 1.3rem; font-weight: bold; margin-top: 5px;}}
-    
-    /* 선행 지표 박스 */
-    .early-warning-box {{ 
-        background-color: #2d3436; 
-        border-left: 5px solid #0984e3; 
-        padding: 15px; 
-        margin-bottom: 10px; 
-        border-radius: 0 8px 8px 0; 
+    .neon-card:hover {{
+        transform: scale(1.03);
+        box-shadow: 0 0 20px currentColor, inset 0 0 10px currentColor;
     }}
-    .squeeze-on {{ color: #00cec9; font-weight: bold; animation: pulse 2s infinite; }}
-    @keyframes pulse {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} 100% {{ opacity: 1; }} }}
+
+    /* 메트릭 제목 & 값 */
+    .metric-title {{
+        font-size: 0.8rem; color: #fff; opacity: 0.8; letter-spacing: 2px; margin-bottom: 5px;
+    }}
+    .metric-value {{
+        font-size: 1.4rem; font-weight: 900; color: #fff;
+    }}
+
+    /* 특이신호 박스 (꺼져있을 때 vs 켜져있을 때) */
+    .signal-box-off {{
+        border: 1px solid #333; background: #111; color: #555;
+        padding: 15px; border-radius: 8px; text-align: center;
+        box-shadow: inset 0 0 10px #000;
+    }}
+    .signal-box-on {{
+        border: 1px solid #ff00de; background: rgba(255, 0, 222, 0.05); color: #ff00de;
+        padding: 15px; border-radius: 8px; text-align: center;
+        box-shadow: 0 0 15px #ff00de, inset 0 0 10px #ff00de;
+        animation: flicker 1.5s infinite alternate;
+    }}
+
+    /* 네온 깜빡임 애니메이션 */
+    @keyframes flicker {{
+        0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {{ opacity: 1; box-shadow: 0 0 15px #ff00de, inset 0 0 10px #ff00de; }}
+        20%, 24%, 55% {{ opacity: 0.5; box-shadow: none; }}
+    }}
 
     /* 타겟/손절 박스 */
     .target-box {{ border: 1px solid #ff4757; color: #ff4757; padding: 10px; border-radius: 5px; text-align: center; background: rgba(255, 71, 87, 0.05); }}
@@ -95,10 +119,10 @@ st.markdown(f"""
 
     /* [복구됨] 버튼 스타일 (빨강 -> 회색 토글) */
     .stButton > button {{
-        width: 100%; 
-        background-color: {btn_bg}; 
+        width: 100%;
+        background-color: {btn_bg};
         color: {btn_txt};
-        border: 1px solid {btn_border}; 
+        border: 1px solid {btn_border};
         height: 3.5em; font-weight: bold;
         transition: all 0.3s;
     }}
@@ -106,7 +130,7 @@ st.markdown(f"""
         box-shadow: 0 0 15px {btn_border};
         color: white;
     }}
-    
+
     /* 매크로 바 */
     .macro-bar {{
         background-color: #0a0a0a; border-bottom: 1px solid #333;
@@ -349,17 +373,66 @@ if st.session_state.is_running:
                 st.plotly_chart(draw_chart_k_style(df, ticker), use_container_width=True)
                 
                 c_1, c_2, c_3 = st.columns(3)
-                with c_1: st.markdown(f"<div class='signal-card'><div class='metric-title'>TREND</div><div class='metric-value' style='color:{trend_col}'>{trend}</div></div>", unsafe_allow_html=True)
-                with c_2: st.markdown(f"<div class='signal-card'><div class='metric-title'>RSI</div><div class='metric-value'>{row['RSI']:.1f}</div></div>", unsafe_allow_html=True)
-                with c_3: 
-                    w_col = "#d63031" if "고래" in whale else "#a29bfe"
-                    st.markdown(f"<div class='signal-card'><div class='metric-title'>VOLUME</div><div class='metric-value' style='color:{w_col}'>{whale}</div></div>", unsafe_allow_html=True)
 
+                # 1. 추세 (Trend) - 상승:네온레드 / 하락:네온블루
+                if is_up:
+                    trend_color = "#ff003c" # Neon Red
+                    trend_icon = "📈"
+                else:
+                    trend_color = "#00f2ff" # Cyan Blue
+                    trend_icon = "📉"
+
+                with c_1:
+                    st.markdown(f"""
+                    <div class='neon-card' style='color: {trend_color};'>
+                        <div class='metric-title'>TREND</div>
+                        <div class='metric-value' style='text-shadow: 0 0 10px {trend_color}'>{trend_icon} {trend}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                # 2. RSI - 네온 옐로우
+                rsi_color = "#ffe600" # Neon Yellow
+                with c_2:
+                    st.markdown(f"""
+                    <div class='neon-card' style='color: {rsi_color};'>
+                        <div class='metric-title'>RSI (14)</div>
+                        <div class='metric-value' style='text-shadow: 0 0 10px {rsi_color}'>{row['RSI']:.1f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                # 3. 거래량 (Volume) - 네온 그린 (고래 출현시 더 밝게)
+                vol_color = "#39ff14" if "고래" in whale else "#008000" # Neon Green vs Dark Green
+                with c_3:
+                    st.markdown(f"""
+                    <div class='neon-card' style='color: {vol_color};'>
+                        <div class='metric-title'>VOLUME</div>
+                        <div class='metric-value' style='text-shadow: 0 0 10px {vol_color}'>{whale}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                # ==========================================
+                # [네온 스타일] 특이 신호 감지
+                # ==========================================
                 has_signal = bool(is_squeeze or (whale_ratio >= 3.0))
-                with st.expander("🚨 특이 신호 감지", expanded=has_signal):
-                    if is_squeeze: st.markdown("<span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈! 에너지가 모였습니다.</span>", unsafe_allow_html=True)
-                    if whale_ratio >= 3.0: st.markdown(f"🟣 <b>수급 폭발!</b> 평소 거래량의 {whale_ratio:.1f}배가 터졌습니다.", unsafe_allow_html=True)
-                    if not has_signal: st.write("특이사항 없음")
+
+                signal_title = "🚨 SIGNAL DETECTED" if has_signal else "💤 SIGNAL STATUS"
+
+                with st.expander(signal_title, expanded=has_signal):
+                    if has_signal:
+                        # 켜진 네온 박스
+                        html_content = "<div class='signal-box-on'>"
+                        if is_squeeze: html_content += "<div>⚡ <b>BOLLINGER SQUEEZE</b> (에너지 응축)</div>"
+                        if whale_ratio >= 3.0: html_content += f"<div style='margin-top:5px'>🟣 <b>WHALE VOLUME</b> (평소의 {whale_ratio:.1f}배)</div>"
+                        html_content += "</div>"
+                        st.markdown(html_content, unsafe_allow_html=True)
+                    else:
+                        # 꺼진 네온 박스
+                        st.markdown(f"""
+                        <div class='signal-box-off'>
+                            <div style='font-size: 1.2rem; margin-bottom:5px;'>✅ SYSTEM NORMAL</div>
+                            <div style='font-size: 0.8rem;'>특이 신호 감지되지 않음</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
                 c_t, c_s = st.columns(2)
                 with c_t: st.markdown(f"<div class='target-box'><div>Target</div><div style='font-size:1.4rem'>${target:.2f}</div></div>", unsafe_allow_html=True)
