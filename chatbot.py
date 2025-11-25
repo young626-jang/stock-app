@@ -35,13 +35,33 @@ st.markdown("""
     .stExpanderContent { color: #fff !important; }
 
     /* 입력창 글씨색 흰색 */
-    .stTextInput input { color: #fff !important; background-color: #1a1a1a !important; }
+    .stTextInput input {
+        color: #fff !important;
+        background-color: #1a1a1a !important;
+        border-color: #333 !important;
+    }
     .stTextInput input::placeholder { color: #888 !important; }
-    .stChatInput input { color: #fff !important; background-color: #1a1a1a !important; }
+
+    .stChatInput { background-color: #050505 !important; }
+    .stChatInput input {
+        color: #fff !important;
+        background-color: #1a1a1a !important;
+        border-color: #333 !important;
+    }
     .stChatInput input::placeholder { color: #888 !important; }
-    input { color: #fff !important; background-color: #1a1a1a !important; }
+
+    input {
+        color: #fff !important;
+        background-color: #1a1a1a !important;
+        border-color: #333 !important;
+    }
     input::placeholder { color: #888 !important; }
-    textarea { color: #fff !important; background-color: #1a1a1a !important; }
+
+    textarea {
+        color: #fff !important;
+        background-color: #1a1a1a !important;
+        border-color: #333 !important;
+    }
     textarea::placeholder { color: #888 !important; }
     
     /* 폰트 & 타이포그래피 */
