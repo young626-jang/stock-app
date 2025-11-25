@@ -322,7 +322,7 @@ if run:
                 # ==========================================
                 has_signal = bool(is_squeeze or (whale_ratio >= 3.0)) 
                 
-                expander_title = "🚨 선행 매매 신호 포착! (클릭)" if has_signal else "✅ 선행 지표: 특이사항 없음 (클릭)"
+                expander_title = "🚨 선행 매매 신호 포착! (클릭)" if has_signal else "✅ 선행 지표: 특이사항 없음"
                 
                 with st.expander(expander_title, expanded=has_signal):
                     if is_squeeze:
