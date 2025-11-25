@@ -26,6 +26,13 @@ st.markdown("""
     .stApp { background-color: #050505; color: #e0e0e0; }
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
+
+    /* 모든 텍스트를 흰색으로 강제 */
+    * { color: #fff !important; }
+    .stMarkdown, .stMarkdown p, .stMarkdown span { color: #fff !important; }
+    .stWrite, .stWrite p { color: #fff !important; }
+    .stExpander { color: #fff !important; }
+    .stExpanderContent { color: #fff !important; }
     
     /* 폰트 & 타이포그래피 */
     h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; margin-bottom: 0px;}
@@ -379,17 +386,64 @@ if run:
                         with st.expander("💊 FDA 리콜 데이터 (한글 번역본)", expanded=False):
                             st.write(fda_data)
 
+                # ==========================================
+                # [📌 분석 결과를 session_state에 저장]
+                # Chat에서 사용하기 위해
+                # ==========================================
+                st.session_state.last_analysis = {
+                    "ticker": ticker,
+                    "price": f"${row['close']:.2f}",
+                    "score": score,
+                    "grade": grade,
+                    "trend": trend,
+                    "rsi": f"{row['RSI']:.1f}",
+                    "whale": whale,
+                    "squeeze": squeeze_msg,
+                    "target": f"${target:.2f}",
+                    "cut": f"${cut:.2f}",
+                    "earnings": earnings['date'],
+                    "earnings_dday": earnings['d_day'],
+                    "report": report
+                }
+
         except Exception as e:
             st.error(f"시스템 오류 발생: {e}")
 
 st.divider()
-if q := st.chat_input("종목 상담 / 질문 입력..."):
+if q := st.chat_input("분석 종목에 대해 질문하기..."):
     with st.chat_message("user"): st.write(q)
     with st.chat_message("assistant"):
-        with st.spinner("검색 중..."):
+        with st.spinner("분석 중..."):
             try:
                 url = "https://api.perplexity.ai/chat/completions"
                 h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-                res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":f"질문: {q} (한국 주식투자자 관점, 짧게, 면책조항X)"}],"temperature":0.3}, headers=h, timeout=15).json()
+
+                # 분석된 종목이 있으면 그 정보를 포함하기
+                if hasattr(st.session_state, 'last_analysis'):
+                    analysis = st.session_state.last_analysis
+                    context = f"""
+[분석 종목 정보]
+- 티커: {analysis['ticker']}
+- 현재가: {analysis['price']}
+- 점수: {analysis['score']}/100 ({analysis['grade']})
+- 추세: {analysis['trend']}
+- RSI: {analysis['rsi']}
+- 거래량: {analysis['whale']}
+- 스퀴즈: {analysis['squeeze']}
+- 목표가: {analysis['target']}
+- 손절가: {analysis['cut']}
+- 실적일: {analysis['earnings']} ({analysis['earnings_dday']})
+
+[AI 분석 결과]
+{analysis['report']}
+
+[사용자 질문]
+{q}
+"""
+                    content = f"{context}\n\n위 분석 결과를 바탕으로 사용자의 질문에 답변하세요. (한국 주식투자자 관점, 짧게, 면책조항X)"
+                else:
+                    content = f"질문: {q} (한국 주식투자자 관점, 짧게, 면책조항X)"
+
+                res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":content}],"temperature":0.3}, headers=h, timeout=15).json()
                 st.write(res['choices'][0]['message']['content'])
             except: st.error("채팅 오류")
