@@ -20,90 +20,101 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-st.markdown("""
+# 분석 상태에 따라 버튼 색상 결정 (시작=빨강, 중단=회색)
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
+
+btn_bg = "#333" if st.session_state.is_running else "#2b0000"
+btn_txt = "#ccc" if st.session_state.is_running else "#ff4757"
+btn_border = "#555" if st.session_state.is_running else "#ff4757"
+
+st.markdown(f"""
     <style>
     /* 전체 테마: 블랙 배경 */
-    .stApp { background-color: #050505; color: #e0e0e0; }
+    .stApp {{ background-color: #050505; color: #e0e0e0; }}
     
-    /* -------------------------------------------
-       [수정] 채팅 입력창 글씨색 검정으로 변경
-    ------------------------------------------- */
-    .stChatInput textarea {
-        color: #000000 !important;       /* 입력 글씨 검정 */
-        caret-color: #000000 !important; /* 커서 색상 검정 */
-        background-color: #f0f2f6 !important; /* 배경 밝은 회색 */
-    }
-    .stChatInput ::placeholder {
-        color: #555555 !important;       /* 플레이스홀더 진한 회색 */
-    }
+    /* 채팅 입력창 글씨색 검정으로 유지 */
+    .stChatInput textarea {{
+        color: #000000 !important;
+        caret-color: #000000 !important;
+        background-color: #f0f2f6 !important;
+    }}
+    .stChatInput ::placeholder {{ color: #555555 !important; }}
 
-    /* 그 외 일반 텍스트 흰색 유지 */
-    .stMarkdown, .stMarkdown p, .stMarkdown span { color: #fff !important; }
+    /* 일반 텍스트 흰색 */
+    .stMarkdown, .stMarkdown p, .stMarkdown span {{ color: #fff !important; }}
     
-    /* 상단 일반 입력창(티커 입력)은 어두운 테마 유지 */
-    .stTextInput input {
+    /* 상단 입력창 어두운 테마 */
+    .stTextInput input {{
         color: #fff !important;
         background-color: #1a1a1a !important;
         border-color: #333 !important;
-    }
+    }}
 
     /* 폰트 & 타이포그래피 */
-    h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; margin-bottom: 0px;}
-    h2, h3 { font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }
+    h1 {{ font-family: 'Courier New', monospace; color: #fff; text-align: center; margin-bottom: 0px;}}
+    h2, h3 {{ font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }}
     
     /* 점수판 */
-    .big-score {
+    .big-score {{
         font-size: clamp(2.5rem, 12vw, 6rem); font-weight: 900;
         text-align: center;
         line-height: 1.1; margin-top: 10px;
         text-shadow: 0 0 20px rgba(255, 71, 87, 0.3);
-    }
-    .grade-badge {
+    }}
+    .grade-badge {{
         font-size: 1.5rem; font-weight: bold; padding: 5px 15px;
         border-radius: 5px; display: inline-block; margin-bottom: 20px;
-    }
+    }}
 
     /* 카드 디자인 */
-    .signal-card {
+    .signal-card {{
         background-color: #111; border: 1px solid #333; border-radius: 8px;
         padding: 15px; margin-bottom: 15px; text-align: center;
-    }
-    .metric-title { font-size: 0.9rem; color: #888; font-weight: bold; } 
-    .metric-value { font-size: 1.3rem; font-weight: bold; margin-top: 5px;}
+    }}
+    .metric-title {{ font-size: 0.9rem; color: #888; font-weight: bold; }} 
+    .metric-value {{ font-size: 1.3rem; font-weight: bold; margin-top: 5px;}}
     
     /* 선행 지표 박스 */
-    .early-warning-box { 
+    .early-warning-box {{ 
         background-color: #2d3436; 
         border-left: 5px solid #0984e3; 
         padding: 15px; 
         margin-bottom: 10px; 
         border-radius: 0 8px 8px 0; 
-    }
-    .squeeze-on { color: #00cec9; font-weight: bold; animation: pulse 2s infinite; }
-    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    }}
+    .squeeze-on {{ color: #00cec9; font-weight: bold; animation: pulse 2s infinite; }}
+    @keyframes pulse {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} 100% {{ opacity: 1; }} }}
 
     /* 타겟/손절 박스 */
-    .target-box { border: 1px solid #ff4757; color: #ff4757; padding: 10px; border-radius: 5px; text-align: center; background: rgba(255, 71, 87, 0.05); }
-    .stop-box { border: 1px solid #00a8ff; color: #00a8ff; padding: 10px; border-radius: 5px; text-align: center; background: rgba(0, 168, 255, 0.05); }
+    .target-box {{ border: 1px solid #ff4757; color: #ff4757; padding: 10px; border-radius: 5px; text-align: center; background: rgba(255, 71, 87, 0.05); }}
+    .stop-box {{ border: 1px solid #00a8ff; color: #00a8ff; padding: 10px; border-radius: 5px; text-align: center; background: rgba(0, 168, 255, 0.05); }}
 
     /* 실적 배지 */
-    .earnings-badge { background-color: #ff4757; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+    .earnings-badge {{ background-color: #ff4757; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }}
 
-    /* 버튼 스타일 */
-    .stButton > button {
+    /* [복구됨] 버튼 스타일 (빨강 -> 회색 토글) */
+    .stButton > button {{
         width: 100%; 
+        background-color: {btn_bg}; 
+        color: {btn_txt};
+        border: 1px solid {btn_border}; 
         height: 3.5em; font-weight: bold;
         transition: all 0.3s;
-    }
+    }}
+    .stButton > button:hover {{
+        box-shadow: 0 0 15px {btn_border};
+        color: white;
+    }}
     
     /* 매크로 바 */
-    .macro-bar {
+    .macro-bar {{
         background-color: #0a0a0a; border-bottom: 1px solid #333;
         padding: 8px; text-align: center;
         font-size: clamp(0.7rem, 2vw, 0.9rem);
         color: #ff9f43; font-weight: bold; margin-bottom: 20px;
         word-wrap: break-word; overflow-wrap: break-word;
-    }
+    }}
     </style>
 """, unsafe_allow_html=True)
 
