@@ -68,11 +68,6 @@ st.markdown(f"""
         background-color: rgba(20, 20, 20, 0.8);
         border: 1px solid currentColor;
         box-shadow: 0 0 10px currentColor, inset 0 0 5px currentColor;
-        transition: all 0.3s ease;
-    }}
-    .grade-badge:hover {{
-        transform: scale(1.05);
-        box-shadow: 0 0 30px currentColor, inset 0 0 15px currentColor;
     }}
 
     /* 네온 카드 (박스 자체가 빛나는 효과) */
@@ -84,11 +79,6 @@ st.markdown(f"""
         text-align: center;
         margin-bottom: 15px;
         box-shadow: 0 0 10px currentColor, inset 0 0 5px currentColor;
-        transition: all 0.3s ease;
-    }}
-    .neon-card:hover {{
-        transform: scale(1.05);
-        box-shadow: 0 0 30px currentColor, inset 0 0 15px currentColor;
     }}
 
     /* 카드 설명 텍스트 */
