@@ -28,7 +28,14 @@ st.markdown("""
     header {visibility: hidden;}
     
     /* 폰트 & 타이포그래피 */
-    h1, h2, h3, h4 { font-family: 'Courier New', monospace; color: #fff; text-align: center; }
+    h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; }
+    
+    /* 🔥 리포트 헤더(##)를 노란색으로 변경 🔥 */
+    h2, h3 { 
+        font-family: 'Courier New', monospace; 
+        color: #FFD700 !important; /* Gold Yellow */
+        text-align: center; 
+    }
     
     /* 점수판 */
     .big-score {
@@ -126,7 +133,7 @@ def get_ai_score(row):
     if row['close'] > row['SMA20']: score += 15
     else: score -= 10
     
-    # 모멘텀 (주석 에러 수정 완료)
+    # 모멘텀
     if 50 <= row['RSI'] <= 70: score += 15
     elif row['RSI'] > 75: score -= 5 # 과매수 감점
     elif row['RSI'] < 30: score += 20 # 과매도 반등 기대
@@ -306,7 +313,9 @@ if run:
                 st.markdown(f"<h1 style='margin:0'>{ticker}</h1>", unsafe_allow_html=True)
                 if earnings['diff'] <= 7:
                     st.markdown(f"<div style='text-align:center'><span class='earnings-badge'>🚨 실적 {earnings['d_day']}</span></div>", unsafe_allow_html=True)
-                st.markdown(f"<h2>${row['close']:.2f}</h2>", unsafe_allow_html=True)
+                
+                # 가격 (흰색 유지)
+                st.markdown(f"<h2 style='color:#fff'>${row['close']:.2f}</h2>", unsafe_allow_html=True)
                 
                 # 2. 점수판
                 st.markdown(f"<div class='big-score' style='color:{score_col}'>{score}</div>", unsafe_allow_html=True)
@@ -329,14 +338,15 @@ if run:
                 with c_s:
                     st.markdown(f"<div class='stop-box'><div>STOP LOSS (S1)</div><div style='font-size:1.4rem; font-weight:bold'>${cut:.2f}</div></div>", unsafe_allow_html=True)
 
-                # 5. AI 심층 리포트 (하단 배치)
+                # 5. AI 심층 리포트 (하단 배치 - 파란박스 제거 & 노란헤더 적용)
                 st.divider()
                 st.markdown("### 🧬 DEEP DIVE ANALYSIS")
                 
                 indicators = {"trend": trend, "whale": whale}
                 with st.spinner("AI WRITING REPORT..."):
                     report = run_deep_analysis(ticker, row['close'], score, indicators, "", fda_data, earnings)
-                    st.info(report)
+                    # st.info 대신 st.markdown 사용 (투명 배경)
+                    st.markdown(report)
                     
                     if info['is_bio']:
                         with st.expander("💊 FDA RAW DATA (번역본)", expanded=False):
