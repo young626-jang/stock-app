@@ -377,16 +377,14 @@ if st.session_state.is_running:
                 # 1. 추세 (Trend) - 상승:네온레드 / 하락:네온블루
                 if is_up:
                     trend_color = "#ff003c" # Neon Red
-                    trend_icon = "📈"
                 else:
                     trend_color = "#00f2ff" # Cyan Blue
-                    trend_icon = "📉"
 
                 with c_1:
                     st.markdown(f"""
                     <div class='neon-card' style='color: {trend_color};'>
                         <div class='metric-title'>TREND</div>
-                        <div class='metric-value' style='text-shadow: 0 0 10px {trend_color}'>{trend_icon} {trend}</div>
+                        <div class='metric-value' style='text-shadow: 0 0 10px {trend_color}'>{trend}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
