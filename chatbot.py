@@ -23,28 +23,69 @@ st.set_page_config(
 
 st.markdown("""
     <style>
+    /* 전체 테마: 블랙 배경 */
     .stApp { background-color: #050505; color: #e0e0e0; }
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
+    
+    /* 폰트 & 타이포그래피 */
     h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; margin-bottom: 0px;}
     h2, h3 { font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }
-    .big-score { font-size: 6rem; font-weight: 900; text-align: center; line-height: 1.1; margin-top: 10px; text-shadow: 0 0 20px rgba(255, 71, 87, 0.3); }
-    .grade-badge { font-size: 1.5rem; font-weight: bold; padding: 5px 15px; border-radius: 5px; display: inline-block; margin-bottom: 20px; }
-    .signal-card { background-color: #111; border: 1px solid #333; border-radius: 8px; padding: 15px; margin-bottom: 15px; text-align: center; }
+    
+    /* 점수판 (기본 빨강) */
+    .big-score {
+        font-size: 6rem; font-weight: 900; 
+        text-align: center; 
+        line-height: 1.1; margin-top: 10px;
+        text-shadow: 0 0 20px rgba(255, 71, 87, 0.3);
+    }
+    .grade-badge {
+        font-size: 1.5rem; font-weight: bold; padding: 5px 15px;
+        border-radius: 5px; display: inline-block; margin-bottom: 20px;
+    }
+
+    /* 카드 디자인 */
+    .signal-card {
+        background-color: #111; border: 1px solid #333; border-radius: 8px;
+        padding: 15px; margin-bottom: 15px; text-align: center;
+    }
     .metric-title { font-size: 0.9rem; color: #888; font-weight: bold; } 
     .metric-value { font-size: 1.3rem; font-weight: bold; margin-top: 5px;}
-    .early-warning-box { background-color: #2d3436; border-left: 5px solid #0984e3; padding: 15px; margin-bottom: 10px; border-radius: 0 8px 8px 0; }
+    
+    /* 선행 지표 박스 */
+    .early-warning-box { 
+        background-color: #2d3436; 
+        border-left: 5px solid #0984e3; 
+        padding: 15px; 
+        margin-bottom: 10px; 
+        border-radius: 0 8px 8px 0; 
+    }
     .squeeze-on { color: #00cec9; font-weight: bold; animation: pulse 2s infinite; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+    /* 타겟/손절 박스 (K-Style: 타겟=빨강, 손절=파랑) */
     .target-box { border: 1px solid #ff4757; color: #ff4757; padding: 10px; border-radius: 5px; text-align: center; background: rgba(255, 71, 87, 0.05); }
     .stop-box { border: 1px solid #00a8ff; color: #00a8ff; padding: 10px; border-radius: 5px; text-align: center; background: rgba(0, 168, 255, 0.05); }
+
+    /* 실적 배지 */
     .earnings-badge { background-color: #ff4757; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
-    .stButton > button { width: 100%; background-color: #2b0000; color: #ff4757; border: 1px solid #ff4757; height: 3.5em; font-weight: bold; transition: all 0.3s; }
+
+    /* 버튼 (빨강 테마) */
+    .stButton > button {
+        width: 100%; background-color: #2b0000; color: #ff4757;
+        border: 1px solid #ff4757; height: 3.5em; font-weight: bold;
+        transition: all 0.3s;
+    }
     .stButton > button:hover { background-color: #ff4757; color: white; box-shadow: 0 0 15px #ff4757; }
+    
+    /* 매크로 바 */
     .macro-bar { background-color: #0a0a0a; border-bottom: 1px solid #333; padding: 8px; text-align: center; font-size: 0.9rem; color: #ff9f43; font-weight: bold; margin-bottom: 20px;}
     </style>
 """, unsafe_allow_html=True)
 
+# ==========================================
+# [2] API 키 로드
+# ==========================================
 try:
     API_KEY = st.secrets["POLYGON_API_KEY"]
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -239,6 +280,8 @@ if run:
                 
                 score = get_ai_score(row)
                 grade = "S (강력매수)" if score >= 80 else "A (매수)" if score >= 60 else "B (중립)" if score >= 40 else "C (매도)"
+                
+                # K-Style 색상 (빨강=좋음)
                 score_col = "#ff4757" if score >= 60 else "#f1c40f" if score >= 40 else "#00a8ff"
                 
                 target = row['close'] + (row['ATR'] * 2)
@@ -262,6 +305,7 @@ if run:
                 st.markdown(f"<div class='big-score' style='color:{score_col}; text-shadow: 0 0 20px {score_col}'>{score}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='text-align:center'><span class='grade-badge' style='border: 2px solid {score_col}; color:{score_col}'>{grade}</span></div>", unsafe_allow_html=True)
 
+                # 🇰🇷 차트 (빨강=상승, 파랑=하락)
                 st.plotly_chart(draw_chart_k_style(df, ticker), use_container_width=True)
                 
                 c1, c2, c3 = st.columns(3)
@@ -274,25 +318,23 @@ if run:
                     st.markdown(f"""<div class='signal-card'><div class='metric-title'>거래량 (VOLUME)</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
 
                 # ==========================================
-                # [🔥 수정된 부분] 스마트 확장 박스
+                # [🔥 수정된 부분] bool()로 감싸서 오류 방지
                 # ==========================================
-                has_signal = is_squeeze or (whale_ratio >= 3.0) # 신호가 있을 때만 펼침
+                has_signal = bool(is_squeeze or (whale_ratio >= 3.0)) 
                 
-                # 박스 제목 결정
                 expander_title = "🚨 선행 매매 신호 포착! (클릭)" if has_signal else "✅ 선행 지표: 특이사항 없음 (클릭)"
                 
                 with st.expander(expander_title, expanded=has_signal):
                     if is_squeeze:
-                        st.markdown(f"<div class='early-warning-box'><span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈 감지!</span><br>주가 변동성이 극도로 축소되었습니다. 곧 폭발적인 방향성이 나옵니다.</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='early-warning-box'><span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈 감지!</span><br>에너지가 모였습니다. 곧 크게 터집니다.</div>", unsafe_allow_html=True)
                     else:
-                        st.markdown(f"<div style='color:#888; padding:5px;'>✔️ 볼린저 밴드: 일반적인 구간입니다.</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='color:#888; padding:10px;'>✔️ 볼린저 밴드: 일반적인 등락 구간입니다.</div>", unsafe_allow_html=True)
                     
                     if whale_ratio >= 3.0:
-                        st.markdown(f"<div style='color:#a29bfe; font-weight:bold; padding:5px;'>🟣 고래 수급 포착! (평소의 {whale_ratio:.1f}배)</div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<div style='color:#888; padding:5px;'>✔️ 수급: 특이사항 없음</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='color:#a29bfe; font-weight:bold; padding:10px;'>🟣 고래 수급 포착! (평소의 {whale_ratio:.1f}배)</div>", unsafe_allow_html=True)
 
                 c_t, c_s = st.columns(2)
+                # 타겟=빨강, 손절=파랑
                 with c_t:
                     st.markdown(f"<div class='target-box'><div>1차 익절가 (Target)</div><div style='font-size:1.4rem; font-weight:bold'>${target:.2f}</div></div>", unsafe_allow_html=True)
                 with c_s:
