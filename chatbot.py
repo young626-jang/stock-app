@@ -9,7 +9,7 @@ import re
 import yfinance as yf
 import pytz
 import time
-import plotly.graph_objects as go # 👈 차트 기능을 위해 추가됨
+import plotly.graph_objects as go
 
 # ==========================================
 # [1] UI: 사이버펑크 퀀트 스타일
@@ -31,7 +31,7 @@ st.markdown("""
     h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; }
     h2, h3 { font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }
     
-    .big-score { font-size: 5rem; font-weight: 900; color: #00ff41; text-align: center; text-shadow: 0 0 20px rgba(0, 255, 65, 0.5); line-height: 1.1; margin-top: 10px; }
+    .big-score { font-size: 5rem; font-weight: 900; color: #00ff41; text-align: center; line-height: 1.1; margin-top: 10px; }
     .grade-badge { font-size: 1.5rem; font-weight: bold; padding: 5px 15px; border: 2px solid #00ff41; border-radius: 5px; color: #00ff41; display: inline-block; margin-bottom: 20px; }
     .signal-card { background-color: #111; border: 1px solid #333; border-radius: 8px; padding: 15px; margin-bottom: 15px; }
     .metric-title { font-size: 0.9rem; color: #aaa; font-weight: bold; } 
@@ -45,7 +45,6 @@ st.markdown("""
     .target-box { border: 1px solid #00ff41; color: #00ff41; padding: 10px; border-radius: 5px; text-align: center; background: rgba(0, 255, 65, 0.05); }
     .stop-box { border: 1px solid #ff4b4b; color: #ff4b4b; padding: 10px; border-radius: 5px; text-align: center; background: rgba(255, 75, 75, 0.05); }
     .earnings-badge { background-color: #ff4757; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
-
     .stButton > button { width: 100%; background-color: #003300; color: #00ff41; border: 1px solid #00ff41; height: 3.5em; font-weight: bold; transition: all 0.3s; }
     .stButton > button:hover { background-color: #00ff41; color: black; box-shadow: 0 0 15px #00ff41; }
     </style>
@@ -108,50 +107,35 @@ def get_ai_score(row):
     if row['Bandwidth'] < 0.10: score += 10 
     return min(100, max(0, int(score)))
 
-def draw_chart(df, ticker):
-    """Plotly를 이용한 수급/고래 차트 그리기"""
-    # 최근 60일 데이터만 사용
+def draw_chart(df, ticker, k_style=True):
+    """수급 차트 (한국식/미국식 색상 지원)"""
     df = df.iloc[-60:]
     
-    # 캔들 색상 결정 (상승: 초록, 하락: 빨강)
-    colors = ['#00ff41' if c >= o else '#ff4757' for c, o in zip(df['close'], df['open'])]
+    if k_style:
+        # 한국식: 상승=빨강(#ff4757), 하락=파랑(#00a8ff)
+        up_color = '#ff4757'
+        down_color = '#00a8ff'
+    else:
+        # 미국식: 상승=초록(#00ff41), 하락=빨강(#ff4757)
+        up_color = '#00ff41'
+        down_color = '#ff4757'
+
+    colors = [up_color if c >= o else down_color for c, o in zip(df['close'], df['open'])]
 
     fig = go.Figure()
-
-    # 1. 거래량 바 (수급)
-    fig.add_trace(go.Bar(
-        x=df['timestamp'], 
-        y=df['volume'],
-        marker_color=colors,
-        name='거래량'
-    ))
-
-    # 2. 고래 감지선 (20일 평균 거래량)
-    fig.add_trace(go.Scatter(
-        x=df['timestamp'],
-        y=df['VolAvg20'],
-        mode='lines',
-        line=dict(color='#a29bfe', width=3, dash='dot'),
-        name='세력 기준선 (20일평균)'
-    ))
+    fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors, name='거래량'))
+    fig.add_trace(go.Scatter(x=df['timestamp'], y=df['VolAvg20'], mode='lines', line=dict(color='#a29bfe', width=3, dash='dot'), name='세력 기준선'))
     
-    # 차트 레이아웃 (다크모드)
     fig.update_layout(
         title=dict(text=f"🐳 {ticker} 수급 레이더 (Whale Radar)", font=dict(color="white", size=20)),
-        paper_bgcolor='#111',
-        plot_bgcolor='#111',
-        font=dict(color='white'),
-        height=400,
+        paper_bgcolor='#111', plot_bgcolor='#111', font=dict(color='white'), height=400,
         margin=dict(l=20, r=20, t=40, b=20),
         xaxis=dict(showgrid=False, color='#888'),
         yaxis=dict(showgrid=True, gridcolor='#333', color='#888'),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        showlegend=True, legend=dict(orientation="h", y=1.02, x=1, xanchor="right")
     )
-    
     return fig
 
-# ... (기존 API 및 매크로 함수 동일) ...
 def get_macro_ticker():
     try:
         data = yf.download(['^TNX', '^VIX', 'CL=F', 'GC=F'], period='1d', progress=False)['Close'].iloc[-1]
@@ -172,7 +156,6 @@ def get_ticker_details(ticker, _client):
 
 @st.cache_data
 def get_earnings_schedule(ticker):
-    # (기존 실적 로직 동일)
     try:
         stock = yf.Ticker(ticker)
         try:
@@ -202,7 +185,6 @@ def calc_d_day(date_obj):
     return {"d_day": d_day, "date": date_obj.strftime("%Y-%m-%d"), "diff": diff}
 
 def get_fda_data(name):
-    # (기존 FDA 로직 동일)
     clean = re.sub(r'[,.]|Inc|Corp|Ltd', '', name).strip().replace(" ", "+")
     url = f"https://api.fda.gov/drug/enforcement.json?api_key={FDA_API_KEY}&search=openfda.manufacturer_name:{clean}&limit=3&sort=report_date:desc"
     try:
@@ -217,7 +199,6 @@ def get_fda_data(name):
     except: return "ℹ️ FDA 데이터 없음"
 
 def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings):
-    # (기존 AI 로직 동일)
     mode = "바이오" if fda and "FDA" in fda else "기술주"
     warn = f"🚨실적발표 {earnings['d_day']} 전!" if earnings['diff'] <= 7 else ""
     prompt = f"""
@@ -245,6 +226,9 @@ def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings
 # ==========================================
 st.markdown(f"<div class='macro-bar'>{get_macro_ticker()}</div>", unsafe_allow_html=True)
 
+# 🇰🇷 한국식/미국식 차트 토글 스위치
+k_style = st.toggle("🇰🇷 한국식 색상 적용 (빨강=상승)", value=True)
+
 c1, c2 = st.columns([3, 1])
 ticker = c1.text_input("TICKER", value="IONQ", label_visibility="collapsed").upper().strip()
 run = c2.button("시스템 스캔 시작 🚀")
@@ -261,10 +245,9 @@ if run:
                 st.error("데이터를 찾을 수 없습니다.")
             else:
                 df = pd.DataFrame(aggs)
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms') # 타임스탬프 변환
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
                 df = df.rename(columns={'open':'open','high':'high','low':'low','close':'close','volume':'volume'})
                 
-                # 지표 계산 (전체 DF 사용)
                 df = calculate_quant_metrics(df)
                 row = df.iloc[-1]
                 
@@ -274,12 +257,25 @@ if run:
                 
                 score = get_ai_score(row)
                 grade = "S (강력매수)" if score >= 80 else "A (매수)" if score >= 60 else "B (중립)" if score >= 40 else "C (매도)"
-                score_col = "#00ff41" if score >= 60 else "#f1c40f" if score >= 40 else "#ff4757"
+                
+                # 점수 색상도 한국식 적용
+                if k_style:
+                    score_col = "#ff4757" if score >= 60 else "#f1c40f" if score >= 40 else "#00a8ff" # 빨강이 좋음
+                else:
+                    score_col = "#00ff41" if score >= 60 else "#f1c40f" if score >= 40 else "#ff4757" # 초록이 좋음
                 
                 target = row['close'] + (row['ATR'] * 2)
                 cut = row['close'] - (row['ATR'] * 1.5)
                 
-                trend = "📈 상승세" if row['close'] > row['SMA20'] else "📉 하락세"
+                # 추세 텍스트 색상 분기
+                is_up = row['close'] > row['SMA20']
+                if k_style:
+                    trend = "📈 상승세" if is_up else "📉 하락세"
+                    trend_col = "#ff4757" if is_up else "#00a8ff"
+                else:
+                    trend = "📈 상승세" if is_up else "📉 하락세"
+                    trend_col = "#00ff41" if is_up else "#ff4757"
+                
                 whale_ratio = row['volume']/row['VolAvg20']
                 whale = f"🐋 고래출현 ({whale_ratio:.1f}x)" if whale_ratio > 3.0 else "일반 수급"
                 is_squeeze = row['Bandwidth'] < 0.10
@@ -295,13 +291,13 @@ if run:
                 st.markdown(f"<div style='text-align:center'><span class='grade-badge' style='border-color:{score_col}; color:{score_col}'>{grade}</span></div>", unsafe_allow_html=True)
 
                 # ==========================================
-                # [🔥 수급 차트 (Whale Radar) 표시]
+                # [차트: 토글 값에 따라 색상 변경]
                 # ==========================================
-                st.plotly_chart(draw_chart(df, ticker), use_container_width=True)
+                st.plotly_chart(draw_chart(df, ticker, k_style), use_container_width=True)
                 
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>추세 (TREND)</div><div class='metric-value' style='color:{'#00ff41' if '상승' in trend else '#ff4757'}'>{trend}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>추세 (TREND)</div><div class='metric-value' style='color:{trend_col}'>{trend}</div></div>""", unsafe_allow_html=True)
                 with c2:
                     st.markdown(f"""<div class='signal-card'><div class='metric-title'>RSI (14)</div><div class='metric-value'>{row['RSI']:.1f}</div></div>""", unsafe_allow_html=True)
                 with c3:
@@ -318,10 +314,18 @@ if run:
                         st.markdown(f"<div style='color:#a29bfe; font-weight:bold; padding:10px;'>🟣 고래 수급 포착! (평소의 {whale_ratio:.1f}배)</div>", unsafe_allow_html=True)
 
                 c_t, c_s = st.columns(2)
+                # 타겟 박스 색상도 한국식 적용
+                if k_style:
+                    t_col = "#ff4757" # 빨강 (상승 목표)
+                    s_col = "#00a8ff" # 파랑 (하락 방어)
+                else:
+                    t_col = "#00ff41" # 초록
+                    s_col = "#ff4757" # 빨강
+                
                 with c_t:
-                    st.markdown(f"<div class='target-box'><div>1차 목표가 (Target)</div><div style='font-size:1.4rem; font-weight:bold'>${target:.2f}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='target-box' style='border-color:{t_col}; color:{t_col}; background:rgba(255,0,0,0.05)'><div>1차 목표가 (Target)</div><div style='font-size:1.4rem; font-weight:bold'>${target:.2f}</div></div>", unsafe_allow_html=True)
                 with c_s:
-                    st.markdown(f"<div class='stop-box'><div>1차 손절가 (Cut)</div><div style='font-size:1.4rem; font-weight:bold'>${cut:.2f}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='stop-box' style='border-color:{s_col}; color:{s_col}; background:rgba(0,0,255,0.05)'><div>1차 손절가 (Cut)</div><div style='font-size:1.4rem; font-weight:bold'>${cut:.2f}</div></div>", unsafe_allow_html=True)
 
                 st.divider()
                 st.markdown("### 🧬 AI 심층 분석 리포트")
