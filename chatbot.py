@@ -14,7 +14,7 @@ import time
 # [1] UI: 사이버펑크 퀀트 스타일
 # ==========================================
 st.set_page_config(
-    page_title="QUANTUM AI TERMINAL",
+    page_title="퀀트 AI 터미널",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -54,14 +54,14 @@ st.markdown("""
         background-color: #111; border: 1px solid #333; border-radius: 8px;
         padding: 15px; margin-bottom: 15px;
     }
-    .metric-title { font-size: 0.8rem; color: #888; text-transform: uppercase; }
-    .metric-value { font-size: 1.2rem; font-weight: bold; color: #fff; }
+    .metric-title { font-size: 0.9rem; color: #aaa; font-weight: bold; } /* 한글 폰트 조금 키움 */
+    .metric-value { font-size: 1.2rem; font-weight: bold; color: #fff; margin-top: 5px;}
     
     /* 매크로 바 */
     .macro-bar {
         background-color: #0a0a0a; border-bottom: 1px solid #333;
-        padding: 8px; text-align: center; font-size: 0.85rem; color: #ff9f43;
-        font-family: 'Courier New', monospace; margin-bottom: 20px;
+        padding: 8px; text-align: center; font-size: 0.9rem; color: #ff9f43;
+        font-family: 'Courier New', monospace; margin-bottom: 20px; font-weight: bold;
     }
     
     /* 가격 타겟 박스 */
@@ -90,7 +90,7 @@ try:
     PERPLEXITY_API_KEY = st.secrets["PERPLEXITY_API_KEY"]
     FDA_API_KEY = st.secrets["FDA_API_KEY"]
 except:
-    st.error("🚨 API KEY MISSING")
+    st.error("🚨 API 키 오류: secrets.toml 파일을 확인하세요.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -149,13 +149,13 @@ def get_ai_score(row):
     return min(100, max(0, int(score)))
 
 def get_macro_ticker():
-    """상단 흐르는 매크로 데이터"""
+    """상단 흐르는 매크로 데이터 (한글 패치 완료)"""
     try:
         data = yf.download(['^TNX', '^VIX', 'CL=F', 'GC=F'], period='1d', progress=False)['Close'].iloc[-1]
         tnx = data['^TNX'].item() if hasattr(data['^TNX'], 'item') else data['^TNX']
         vix = data['^VIX'].item() if hasattr(data['^VIX'], 'item') else data['^VIX']
-        return f"US10Y: {tnx:.2f}% | VIX: {vix:.2f} | WTI: ${data['CL=F']:.1f} | GOLD: ${data['GC=F']:.0f}"
-    except: return "MARKET DATA LOADING..."
+        return f"국채10년: {tnx:.2f}% | VIX: {vix:.2f} | 유가: ${data['CL=F']:.1f} | 금: ${data['GC=F']:.0f}"
+    except: return "매크로 데이터 로딩 중..."
 
 # ==========================================
 # [4] 인텔리전스 엔진: 데이터 수집 & AI
@@ -269,10 +269,10 @@ st.markdown(f"<div class='macro-bar'>{get_macro_ticker()}</div>", unsafe_allow_h
 # 2. 검색창
 c1, c2 = st.columns([3, 1])
 ticker = c1.text_input("TICKER", value="IONQ", label_visibility="collapsed").upper().strip()
-run = c2.button("SYSTEM SCAN 🚀")
+run = c2.button("시스템 스캔 시작 🚀")
 
 if run:
-    with st.spinner("QUANTUM ENGINE: ANALYZING DATA STREAMS..."):
+    with st.spinner("AI 퀀트 엔진: 데이터 수집 및 분석 중..."):
         try:
             client = RESTClient(API_KEY)
             
@@ -282,7 +282,7 @@ if run:
             aggs = list(client.list_aggs(ticker, 1, "day", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), limit=50000))
             
             if not aggs:
-                st.error("DATA NOT FOUND")
+                st.error("데이터를 찾을 수 없습니다. 티커를 확인하세요.")
             else:
                 # B. 데이터 가공
                 df = pd.DataFrame(aggs)
@@ -321,51 +321,51 @@ if run:
                 st.markdown(f"<div class='big-score' style='color:{score_col}'>{score}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='text-align:center'><span class='grade-badge' style='border-color:{score_col}; color:{score_col}'>{grade}</span></div>", unsafe_allow_html=True)
                 
-                # 3. 퀀트 데이터 그리드
+                # 3. 퀀트 데이터 그리드 (한글화)
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>TREND</div><div class='metric-value' style='color:{'#00ff41' if '상승' in trend else '#ff4757'}'>{trend}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>추세 (TREND)</div><div class='metric-value' style='color:{'#00ff41' if '상승' in trend else '#ff4757'}'>{trend}</div></div>""", unsafe_allow_html=True)
                 with c2:
                     st.markdown(f"""<div class='signal-card'><div class='metric-title'>RSI (14)</div><div class='metric-value'>{row['RSI']:.1f}</div></div>""", unsafe_allow_html=True)
                 with c3:
                     wh_col = "#d63031" if "일반" in whale else "#a29bfe"
-                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>VOLUME</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>거래량 (VOLUME)</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
 
-                # 4. 타겟/손절가
+                # 4. 타겟/손절가 (한글화)
                 c_t, c_s = st.columns(2)
                 with c_t:
-                    st.markdown(f"<div class='target-box'><div>TARGET (R1)</div><div style='font-size:1.4rem; font-weight:bold'>${target:.2f}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='target-box'><div>1차 목표가 (Target)</div><div style='font-size:1.4rem; font-weight:bold'>${target:.2f}</div></div>", unsafe_allow_html=True)
                 with c_s:
-                    st.markdown(f"<div class='stop-box'><div>STOP LOSS (S1)</div><div style='font-size:1.4rem; font-weight:bold'>${cut:.2f}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='stop-box'><div>1차 손절가 (Cut)</div><div style='font-size:1.4rem; font-weight:bold'>${cut:.2f}</div></div>", unsafe_allow_html=True)
 
                 # 5. AI 심층 리포트 (하단 배치 - 파란박스 제거 & 노란헤더 적용)
                 st.divider()
-                st.markdown("### 🧬 DEEP DIVE ANALYSIS")
+                st.markdown("### 🧬 AI 심층 분석 리포트")
                 
                 indicators = {"trend": trend, "whale": whale}
-                with st.spinner("AI WRITING REPORT..."):
+                with st.spinner("AI 리포트 작성 중..."):
                     report = run_deep_analysis(ticker, row['close'], score, indicators, "", fda_data, earnings)
                     # st.info 대신 st.markdown 사용 (투명 배경)
                     st.markdown(report)
                     
                     if info['is_bio']:
-                        with st.expander("💊 FDA RAW DATA (번역본)", expanded=False):
+                        with st.expander("💊 FDA 리콜 데이터 (한글 번역본)", expanded=False):
                             st.write(fda_data)
 
         except Exception as e:
-            st.error(f"SYSTEM ERROR: {e}")
+            st.error(f"시스템 오류 발생: {e}")
 
 # ==========================================
 # [6] 채팅 (하단 고정)
 # ==========================================
 st.divider()
-if q := st.chat_input("Ask AI Analyst..."):
+if q := st.chat_input("AI 애널리스트에게 질문하기..."):
     with st.chat_message("user"): st.write(q)
     with st.chat_message("assistant"):
-        with st.spinner("Searching..."):
+        with st.spinner("검색 중..."):
             try:
                 url = "https://api.perplexity.ai/chat/completions"
                 h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
                 res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":f"질문: {q} (주식관련, 짧게, 면책조항X)"}],"temperature":0.1}, headers=h).json()
                 st.write(res['choices'][0]['message']['content'])
-            except: st.error("Chat Error")
+            except: st.error("채팅 오류")
