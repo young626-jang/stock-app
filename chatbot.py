@@ -8,7 +8,6 @@ import requests
 import re
 import yfinance as yf
 import pytz
-import time
 import plotly.graph_objects as go
 
 # ==========================================
@@ -17,7 +16,7 @@ import plotly.graph_objects as go
 st.set_page_config(
     page_title="K-QUANT TERMINAL",
     page_icon="📈",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed"
 )
 
@@ -32,10 +31,10 @@ st.markdown("""
     h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; margin-bottom: 0px;}
     h2, h3 { font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }
     
-    /* 점수판 (기본 빨강) */
+    /* 점수판 (기본 빨강) - 반응형 */
     .big-score {
-        font-size: 6rem; font-weight: 900; 
-        text-align: center; 
+        font-size: clamp(2.5rem, 12vw, 6rem); font-weight: 900;
+        text-align: center;
         line-height: 1.1; margin-top: 10px;
         text-shadow: 0 0 20px rgba(255, 71, 87, 0.3);
     }
@@ -78,8 +77,36 @@ st.markdown("""
     }
     .stButton > button:hover { background-color: #ff4757; color: white; box-shadow: 0 0 15px #ff4757; }
     
-    /* 매크로 바 */
-    .macro-bar { background-color: #0a0a0a; border-bottom: 1px solid #333; padding: 8px; text-align: center; font-size: 0.9rem; color: #ff9f43; font-weight: bold; margin-bottom: 20px;}
+    /* 매크로 바 - 모바일 친화적 */
+    .macro-bar {
+        background-color: #0a0a0a; border-bottom: 1px solid #333;
+        padding: 8px; text-align: center;
+        font-size: clamp(0.7rem, 2vw, 0.9rem);
+        color: #ff9f43; font-weight: bold; margin-bottom: 20px;
+        word-wrap: break-word; overflow-wrap: break-word;
+    }
+
+    /* 모바일 반응형 (화면 너비 768px 이하) */
+    @media (max-width: 768px) {
+        h1 { font-size: clamp(1.2rem, 5vw, 2rem); }
+        h2, h3 { font-size: clamp(1rem, 4vw, 1.5rem); }
+        .grade-badge { font-size: 1rem; padding: 4px 12px; }
+        .metric-title { font-size: 0.8rem; }
+        .metric-value { font-size: 1.1rem; }
+        .stButton > button { height: 3em; font-size: 0.9rem; }
+    }
+
+    /* 초소형 모바일 (화면 너비 480px 이하) */
+    @media (max-width: 480px) {
+        h1 { font-size: 1.2rem; margin-bottom: 5px; }
+        .big-score { font-size: 2.5rem; margin-top: 5px; }
+        .grade-badge { font-size: 0.9rem; padding: 3px 10px; }
+        .signal-card { padding: 10px; margin-bottom: 10px; }
+        .metric-title { font-size: 0.75rem; }
+        .metric-value { font-size: 0.95rem; }
+        .target-box, .stop-box { padding: 8px; }
+        .stButton > button { height: 2.8em; font-size: 0.85rem; }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -143,19 +170,19 @@ def get_ai_score(row):
     if row['Bandwidth'] < 0.10: score += 10 
     return min(100, max(0, int(score)))
 
-def draw_chart_k_style(df, ticker):
+def draw_chart_k_style(df, ticker, height=400):
     df = df.iloc[-60:]
     colors = ['#ff4757' if c >= o else '#00a8ff' for c, o in zip(df['close'], df['open'])]
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors, name='거래량'))
     fig.add_trace(go.Scatter(x=df['timestamp'], y=df['VolAvg20'], mode='lines', line=dict(color='#a29bfe', width=3, dash='dot'), name='세력선'))
     fig.update_layout(
-        title=dict(text=f"🐳 {ticker} 수급 차트", font=dict(color="white", size=20)),
-        paper_bgcolor='#111', plot_bgcolor='#111', font=dict(color='white'), height=400,
-        margin=dict(l=20, r=20, t=40, b=20),
+        title=dict(text=f"🐳 {ticker} 수급 차트", font=dict(color="white", size=18)),
+        paper_bgcolor='#111', plot_bgcolor='#111', font=dict(color='white'), height=height,
+        margin=dict(l=15, r=15, t=35, b=15),
         xaxis=dict(showgrid=False, color='#888'),
         yaxis=dict(showgrid=True, gridcolor='#333', color='#888'),
-        showlegend=True, legend=dict(orientation="h", y=1.02, x=1, xanchor="right")
+        showlegend=True, legend=dict(orientation="h", y=1.02, x=1, xanchor="right", font=dict(size=10))
     )
     return fig
 
@@ -244,7 +271,7 @@ def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings
     url = "https://api.perplexity.ai/chat/completions"
     h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
     try:
-        return requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":prompt}],"temperature":0.3}, headers=h).json()['choices'][0]['message']['content']
+        return requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":prompt}],"temperature":0.3}, headers=h, timeout=15).json()['choices'][0]['message']['content']
     except: return "AI 분석 연결 실패"
 
 # ==========================================
@@ -291,7 +318,7 @@ if run:
                 trend = "📈 상승세" if is_up else "📉 하락세"
                 trend_col = "#ff4757" if is_up else "#00a8ff"
                 
-                whale_ratio = row['volume']/row['VolAvg20']
+                whale_ratio = row['volume'] / max(row['VolAvg20'], 1)
                 whale = f"🐋 고래출현 ({whale_ratio:.1f}x)" if whale_ratio > 3.0 else "일반 수급"
                 is_squeeze = row['Bandwidth'] < 0.10
                 squeeze_msg = "⚡ 에너지 응축 (폭발 임박)" if is_squeeze else "일반 변동성"
@@ -305,8 +332,9 @@ if run:
                 st.markdown(f"<div class='big-score' style='color:{score_col}; text-shadow: 0 0 20px {score_col}'>{score}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='text-align:center'><span class='grade-badge' style='border: 2px solid {score_col}; color:{score_col}'>{grade}</span></div>", unsafe_allow_html=True)
 
-                # 🇰🇷 차트 (빨강=상승, 파랑=하락)
-                st.plotly_chart(draw_chart_k_style(df, ticker), use_container_width=True)
+                # 🇰🇷 차트 (빨강=상승, 파랑=하락) - 모바일 친화적 높이
+                chart_height = 300 if st.session_state.get("is_mobile", False) else 400
+                st.plotly_chart(draw_chart_k_style(df, ticker, height=chart_height), use_container_width=True)
                 
                 c1, c2, c3 = st.columns(3)
                 with c1:
@@ -362,6 +390,6 @@ if q := st.chat_input("종목 상담 / 질문 입력..."):
             try:
                 url = "https://api.perplexity.ai/chat/completions"
                 h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-                res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":f"질문: {q} (한국 주식투자자 관점, 짧게, 면책조항X)"}],"temperature":0.3}, headers=h).json()
+                res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":f"질문: {q} (한국 주식투자자 관점, 짧게, 면책조항X)"}],"temperature":0.3}, headers=h, timeout=15).json()
                 st.write(res['choices'][0]['message']['content'])
             except: st.error("채팅 오류")
