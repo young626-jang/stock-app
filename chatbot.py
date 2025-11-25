@@ -11,7 +11,7 @@ import pytz
 import plotly.graph_objects as go
 
 # ==========================================
-# [1] UI: K-퀀트 스타일 (Red & Blue)
+# [1] UI 설정 및 CSS (채팅창 글씨색 수정됨)
 # ==========================================
 st.set_page_config(
     page_title="K-QUANT TERMINAL",
@@ -24,37 +24,34 @@ st.markdown("""
     <style>
     /* 전체 테마: 블랙 배경 */
     .stApp { background-color: #050505; color: #e0e0e0; }
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
+    
+    /* -------------------------------------------
+       [수정] 채팅 입력창 글씨색 검정으로 변경
+    ------------------------------------------- */
+    .stChatInput textarea {
+        color: #000000 !important;       /* 입력 글씨 검정 */
+        caret-color: #000000 !important; /* 커서 색상 검정 */
+        background-color: #f0f2f6 !important; /* 배경 밝은 회색 */
+    }
+    .stChatInput ::placeholder {
+        color: #555555 !important;       /* 플레이스홀더 진한 회색 */
+    }
 
-    /* 모든 텍스트를 흰색으로 강제 */
-    * { color: #fff !important; }
+    /* 그 외 일반 텍스트 흰색 유지 */
     .stMarkdown, .stMarkdown p, .stMarkdown span { color: #fff !important; }
-    .stWrite, .stWrite p { color: #fff !important; }
-    .stExpander { color: #fff !important; }
-    .stExpanderContent { color: #fff !important; }
-
-    /* 입력창 글씨색 흰색 */
+    
+    /* 상단 일반 입력창(티커 입력)은 어두운 테마 유지 */
     .stTextInput input {
         color: #fff !important;
         background-color: #1a1a1a !important;
         border-color: #333 !important;
     }
-    .stTextInput input::placeholder { color: #888 !important; }
-
-    .stChatInput { background-color: #050505 !important; }
-    .stChatInput input {
-        color: #fff !important;
-        background-color: #1a1a1a !important;
-        border-color: #333 !important;
-    }
-    .stChatInput input::placeholder { color: #888 !important; }
 
     /* 폰트 & 타이포그래피 */
     h1 { font-family: 'Courier New', monospace; color: #fff; text-align: center; margin-bottom: 0px;}
     h2, h3 { font-family: 'Courier New', monospace; color: #FFD700 !important; text-align: center; }
     
-    /* 점수판 (기본 빨강) - 반응형 */
+    /* 점수판 */
     .big-score {
         font-size: clamp(2.5rem, 12vw, 6rem); font-weight: 900;
         text-align: center;
@@ -85,22 +82,21 @@ st.markdown("""
     .squeeze-on { color: #00cec9; font-weight: bold; animation: pulse 2s infinite; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-    /* 타겟/손절 박스 (K-Style: 타겟=빨강, 손절=파랑) */
+    /* 타겟/손절 박스 */
     .target-box { border: 1px solid #ff4757; color: #ff4757; padding: 10px; border-radius: 5px; text-align: center; background: rgba(255, 71, 87, 0.05); }
     .stop-box { border: 1px solid #00a8ff; color: #00a8ff; padding: 10px; border-radius: 5px; text-align: center; background: rgba(0, 168, 255, 0.05); }
 
     /* 실적 배지 */
     .earnings-badge { background-color: #ff4757; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
 
-    /* 버튼 (빨강 테마) */
+    /* 버튼 스타일 */
     .stButton > button {
-        width: 100%; background-color: #2b0000; color: #ff4757;
-        border: 1px solid #ff4757; height: 3.5em; font-weight: bold;
+        width: 100%; 
+        height: 3.5em; font-weight: bold;
         transition: all 0.3s;
     }
-    .stButton > button:hover { background-color: #ff4757; color: white; box-shadow: 0 0 15px #ff4757; }
     
-    /* 매크로 바 - 모바일 친화적 */
+    /* 매크로 바 */
     .macro-bar {
         background-color: #0a0a0a; border-bottom: 1px solid #333;
         padding: 8px; text-align: center;
@@ -112,25 +108,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# [2] API 키 로드
+# [2] API 키 및 설정
 # ==========================================
 try:
     API_KEY = st.secrets["POLYGON_API_KEY"]
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     PERPLEXITY_API_KEY = st.secrets["PERPLEXITY_API_KEY"]
-    # FDA 키는 없어도 동작하도록 처리
     FDA_API_KEY = st.secrets.get("FDA_API_KEY", "")
-except FileNotFoundError:
-    st.error("🚨 `.streamlit/secrets.toml` 파일이 없습니다. API 키를 설정해주세요.")
-    st.stop()
-except Exception as e:
-    st.error(f"🚨 API 키 설정 오류: {e}")
+except:
+    st.error("🚨 `.streamlit/secrets.toml` 파일 또는 API 키를 확인해주세요.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# [3] 퀀트 엔진
+# [3] 퀀트 & 데이터 함수
 # ==========================================
 def calculate_quant_metrics(df):
     delta = df['close'].diff()
@@ -158,7 +150,6 @@ def calculate_quant_metrics(df):
     df['Bandwidth'] = (df['Upper'] - df['Lower']) / df['SMA20']
     
     df['OBV'] = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
-    
     return df
 
 def get_ai_score(row):
@@ -191,38 +182,18 @@ def draw_chart_k_style(df, ticker, height=400):
     )
     return fig
 
-# [FIX] 매크로 데이터 NaN 오류 수정 함수
 def get_macro_ticker():
     try:
-        tickers = ['^TNX', '^VIX', 'CL=F', 'GC=F']
-        # period='5d'로 설정하여 최근 5일 중 유효한 데이터가 있는 날을 찾음
-        data = yf.download(tickers, period='5d', progress=False)
+        data = yf.download(['^TNX', '^VIX', 'CL=F', 'GC=F'], period='5d', progress=False)
+        if 'Close' in data.columns: closes = data['Close']
+        else: closes = data
         
-        # yfinance 최신 버전은 'Close' 컬럼 아래 티커가 오는 MultiIndex 구조일 수 있음
-        if 'Close' in data.columns:
-            closes = data['Close']
-        else:
-            closes = data  # 구조가 다를 경우 대비
-
-        # 각 티커별로 NaN을 제외하고 가장 최신 값(.iloc[-1])을 가져옴
-        def get_last_valid(ticker):
-            try:
-                if ticker in closes.columns:
-                    series = closes[ticker].dropna()
-                    if not series.empty:
-                        return series.iloc[-1]
-                return 0.0
-            except:
-                return 0.0
-
-        tnx = get_last_valid('^TNX')
-        vix = get_last_valid('^VIX')
-        oil = get_last_valid('CL=F')
-        gold = get_last_valid('GC=F')
-
-        return f"국채10년: {tnx:.2f}% | VIX: {vix:.2f} | 유가: ${oil:.1f} | 금: ${gold:.0f}"
-    except Exception as e:
-        return f"매크로 로딩 중... ({str(e)[:10]})"
+        def get_val(sym):
+            try: return closes[sym].dropna().iloc[-1]
+            except: return 0.0
+            
+        return f"국채10년: {get_val('^TNX'):.2f}% | VIX: {get_val('^VIX'):.2f} | 유가: ${get_val('CL=F'):.1f} | 금: ${get_val('GC=F'):.0f}"
+    except: return "매크로 데이터 로딩 중..."
 
 @st.cache_data(ttl=3600)
 def get_ticker_details(ticker, _client):
@@ -239,21 +210,11 @@ def get_earnings_schedule(ticker):
     try:
         url = "https://api.perplexity.ai/chat/completions"
         h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-        msg = [{"role":"user", "content":f"Find next earnings date for {ticker}. Output YYYY-MM-DD only."}]
+        msg = [{"role":"user", "content":f"Find next earnings date for {ticker}. Output format: YYYY-MM-DD only."}]
         res = requests.post(url, json={"model":"sonar","messages":msg,"temperature":0.1}, headers=h, timeout=4)
         match = re.search(r'\d{4}-\d{2}-\d{2}', res.json()['choices'][0]['message']['content'])
         if match: return calc_d_day(datetime.strptime(match.group(0), "%Y-%m-%d").date())
     except: pass
-    
-    # yfinance 백업
-    try:
-        stock = yf.Ticker(ticker)
-        df = stock.get_earnings_dates(limit=5)
-        if df is not None and not df.empty:
-            future = df[df.index > datetime.now()].sort_index()
-            if not future.empty: return calc_d_day(future.index[0])
-    except: pass
-    
     return {"d_day": "-", "date": "미정", "diff": 999}
 
 def calc_d_day(date_obj):
@@ -280,19 +241,19 @@ def get_fda_data(name):
 def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings):
     warn = f"🚨실적발표 {earnings['d_day']} 전!" if earnings['diff'] <= 7 else ""
     prompt = f"""
-    [ROLE] 한국의 주식 고수 (K-Stock Trader)
-    [TARGET] {ticker} (현재가: ${price})
-    [QUANT] Score: {score}, 추세: {indicators['trend']}, 수급: {indicators['whale']}, 스퀴즈: {indicators['squeeze']}
+    [ROLE] 한국의 주식 고수
+    [TARGET] {ticker} (${price})
+    [QUANT] Score: {score}, {indicators['trend']}, {indicators['whale']}, {indicators['squeeze']}
     [DATA] 실적: {earnings['date']} ({earnings['d_day']}) {warn}, FDA: {fda}
     [MISSION] 
     1. 최신 뉴스 및 재료 검색(Search Web).
-    2. 한국 주식 용어 사용 (떡상, 떡락, 매집, 설거지 등 자연스럽게).
-    3. 면책조항 절대 금지. 형이 동생한테 말하듯이.
+    2. 한국 주식 용어 사용.
+    3. 면책조항 금지.
     [OUTPUT]
     ## ⚡ 뉴스 & 팩트체크
-    (핵심만 3줄)
+    (3줄 요약)
     ## ⚠️ 리스크 진단
-    (실적, FDA, 악재 등)
+    (핵심 위험요소)
     ## 🏛️ 최종 대응 전략
     (풀매수/분할매수/관망/손절) - (이유 한줄)
     """
@@ -303,16 +264,28 @@ def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings
     except: return "AI 분석 연결 실패"
 
 # ==========================================
-# [5] 메인 애플리케이션
+# [4] 메인 로직 (버튼 토글 기능 적용)
 # ==========================================
 st.markdown(f"<div class='macro-bar'>{get_macro_ticker()}</div>", unsafe_allow_html=True)
 
+# Session State 초기화 (분석 상태 관리)
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
+
+def toggle_analysis():
+    st.session_state.is_running = not st.session_state.is_running
+
 c1, c2 = st.columns([3, 1])
 ticker = c1.text_input("TICKER", value="IONQ", label_visibility="collapsed").upper().strip()
-run = c2.button("분석 시작 🔥")
 
-if run:
-    with st.spinner(f"AI 퀀트 엔진: {ticker} 데이터 수집 및 분석 중..."):
+# 버튼 라벨 및 콜백 설정
+btn_label = "🛑 분석 중단" if st.session_state.is_running else "🔥 분석 시작"
+# 버튼을 누르면 toggle_analysis 함수가 실행되어 상태가 반전됨
+c2.button(btn_label, on_click=toggle_analysis)
+
+# 상태가 True일 때만 분석 실행
+if st.session_state.is_running:
+    with st.spinner(f"AI 퀀트 엔진: {ticker} 실시간 분석 중..."):
         try:
             client = RESTClient(API_KEY)
             end = datetime.now(pytz.timezone("America/New_York"))
@@ -321,6 +294,7 @@ if run:
             
             if not aggs:
                 st.error("데이터를 찾을 수 없습니다. 티커를 확인해주세요.")
+                st.session_state.is_running = False # 데이터 없으면 중단
             else:
                 df = pd.DataFrame(aggs)
                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -328,18 +302,16 @@ if run:
                 
                 df = calculate_quant_metrics(df)
                 if len(df) < 20:
-                    st.error("데이터 부족: 최근 20일 거래 데이터가 필요합니다.")
+                    st.error("데이터 부족")
                     st.stop()
 
                 row = df.iloc[-1]
-                
                 info = get_ticker_details(ticker, client)
                 earnings = get_earnings_schedule(ticker)
                 fda_data = get_fda_data(info['name']) if info['is_bio'] else ""
                 
                 score = get_ai_score(row)
                 grade = "S (강력매수)" if score >= 80 else "A (매수)" if score >= 60 else "B (중립)" if score >= 40 else "C (매도)"
-                
                 score_col = "#ff4757" if score >= 60 else "#f1c40f" if score >= 40 else "#00a8ff"
                 
                 target = row['close'] + (row['ATR'] * 2)
@@ -352,9 +324,9 @@ if run:
                 whale_ratio = row['volume'] / max(row['VolAvg20'], 1)
                 whale = f"🐋 고래출현 ({whale_ratio:.1f}x)" if whale_ratio > 3.0 else "일반 수급"
                 is_squeeze = row['Bandwidth'] < 0.10
-                squeeze_msg = "⚡ 에너지 응축 (폭발 임박)" if is_squeeze else "일반 변동성"
+                squeeze_msg = "⚡ 스퀴즈 (폭발 임박)" if is_squeeze else "일반"
                 
-                # UI 출력
+                # UI Render
                 st.markdown(f"<h1 style='margin:0'>{ticker}</h1>", unsafe_allow_html=True)
                 if earnings['diff'] <= 7:
                     st.markdown(f"<div style='text-align:center'><span class='earnings-badge'>🚨 실적 {earnings['d_day']}</span></div>", unsafe_allow_html=True)
@@ -365,87 +337,70 @@ if run:
 
                 st.plotly_chart(draw_chart_k_style(df, ticker), use_container_width=True)
                 
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>추세 (TREND)</div><div class='metric-value' style='color:{trend_col}'>{trend}</div></div>""", unsafe_allow_html=True)
-                with c2:
-                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>RSI (14)</div><div class='metric-value'>{row['RSI']:.1f}</div></div>""", unsafe_allow_html=True)
-                with c3:
-                    wh_col = "#d63031" if "고래" in whale else "#a29bfe"
-                    st.markdown(f"""<div class='signal-card'><div class='metric-title'>거래량 (VOLUME)</div><div class='metric-value' style='color:{wh_col}'>{whale}</div></div>""", unsafe_allow_html=True)
+                c_1, c_2, c_3 = st.columns(3)
+                with c_1: st.markdown(f"<div class='signal-card'><div class='metric-title'>TREND</div><div class='metric-value' style='color:{trend_col}'>{trend}</div></div>", unsafe_allow_html=True)
+                with c_2: st.markdown(f"<div class='signal-card'><div class='metric-title'>RSI</div><div class='metric-value'>{row['RSI']:.1f}</div></div>", unsafe_allow_html=True)
+                with c_3: 
+                    w_col = "#d63031" if "고래" in whale else "#a29bfe"
+                    st.markdown(f"<div class='signal-card'><div class='metric-title'>VOLUME</div><div class='metric-value' style='color:{w_col}'>{whale}</div></div>", unsafe_allow_html=True)
 
-                has_signal = bool(is_squeeze or (whale_ratio >= 3.0)) 
-                
-                expander_title = "🚨 선행 매매 신호 포착! (클릭)" if has_signal else "✅ 선행 지표: 특이사항 없음"
-                
-                with st.expander(expander_title, expanded=has_signal):
-                    if is_squeeze:
-                        st.markdown(f"<div class='early-warning-box'><span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈 감지!</span><br>에너지가 모였습니다. 곧 위든 아래든 크게 터집니다.</div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<div style='color:#888; padding:10px;'>✔️ 볼린저 밴드: 일반적인 등락 구간입니다.</div>", unsafe_allow_html=True)
-                    
-                    if whale_ratio >= 3.0:
-                        st.markdown(f"<div style='color:#a29bfe; font-weight:bold; padding:10px;'>🟣 고래 수급 포착! (평소의 {whale_ratio:.1f}배)</div>", unsafe_allow_html=True)
+                has_signal = bool(is_squeeze or (whale_ratio >= 3.0))
+                with st.expander("🚨 특이 신호 감지", expanded=has_signal):
+                    if is_squeeze: st.markdown("<span class='squeeze-on'>⚡ 볼린저 밴드 스퀴즈! 에너지가 모였습니다.</span>", unsafe_allow_html=True)
+                    if whale_ratio >= 3.0: st.markdown(f"🟣 <b>수급 폭발!</b> 평소 거래량의 {whale_ratio:.1f}배가 터졌습니다.", unsafe_allow_html=True)
+                    if not has_signal: st.write("특이사항 없음")
 
                 c_t, c_s = st.columns(2)
-                with c_t:
-                    st.markdown(f"<div class='target-box'><div>1차 익절가 (Target)</div><div style='font-size:1.4rem; font-weight:bold'>${target:.2f}</div></div>", unsafe_allow_html=True)
-                with c_s:
-                    st.markdown(f"<div class='stop-box'><div>1차 손절가 (Cut)</div><div style='font-size:1.4rem; font-weight:bold'>${cut:.2f}</div></div>", unsafe_allow_html=True)
+                with c_t: st.markdown(f"<div class='target-box'><div>Target</div><div style='font-size:1.4rem'>${target:.2f}</div></div>", unsafe_allow_html=True)
+                with c_s: st.markdown(f"<div class='stop-box'><div>Cut</div><div style='font-size:1.4rem'>${cut:.2f}</div></div>", unsafe_allow_html=True)
 
                 st.divider()
-                st.markdown("### 🧬 AI 심층 분석 리포트")
+                st.markdown("### 🧬 AI 심층 분석")
                 
-                indicators_d = {"trend": trend, "whale": whale, "squeeze": squeeze_msg}
-                with st.spinner("AI가 차트와 뉴스를 분석 중입니다..."):
-                    report = run_deep_analysis(ticker, row['close'], score, indicators_d, "", fda_data, earnings)
-                    st.markdown(report)
-                    if info['is_bio']:
-                        with st.expander("💊 FDA 리콜 데이터 (한글 번역본)", expanded=False):
-                            st.write(fda_data)
+                ind_dict = {"trend": trend, "whale": whale, "squeeze": squeeze_msg}
+                report = run_deep_analysis(ticker, row['close'], score, ind_dict, "", fda_data, earnings)
+                st.markdown(report)
+                if info['is_bio']:
+                    with st.expander("💊 FDA 리콜 정보", expanded=False): st.write(fda_data)
 
                 st.session_state.last_analysis = {
-                    "ticker": ticker,
-                    "price": f"${row['close']:.2f}",
-                    "score": score,
-                    "grade": grade,
-                    "trend": trend,
-                    "rsi": f"{row['RSI']:.1f}",
-                    "whale": whale,
-                    "squeeze": squeeze_msg,
-                    "target": f"${target:.2f}",
-                    "cut": f"${cut:.2f}",
-                    "earnings": earnings['date'],
-                    "earnings_dday": earnings['d_day'],
-                    "report": report
+                    "ticker": ticker, "price": f"${row['close']:.2f}", "score": score, "grade": grade,
+                    "trend": trend, "report": report
                 }
 
         except Exception as e:
-            st.error(f"시스템 오류 발생: {e}")
+            st.error(f"오류: {e}")
+            st.session_state.is_running = False
 
+# ==========================================
+# [5] 채팅 (추천 기능 포함)
+# ==========================================
 st.divider()
-if q := st.chat_input("분석 종목에 대해 질문하기..."):
-    with st.chat_message("user"): st.write(q)
+if q := st.chat_input("종목 추천이나 분석 내용에 대해 질문하세요..."):
+    with st.chat_message("user"):
+        # 입력된 텍스트는 CSS로 검정색으로 보임
+        st.write(q)
     with st.chat_message("assistant"):
-        with st.spinner("분석 중..."):
+        with st.spinner("AI가 생각 중입니다..."):
             try:
                 url = "https://api.perplexity.ai/chat/completions"
                 h = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
 
-                if hasattr(st.session_state, 'last_analysis'):
+                if hasattr(st.session_state, 'last_analysis') and "추천" not in q and "종목" not in q:
                     analysis = st.session_state.last_analysis
-                    context = f"""
-[종목 정보] {analysis['ticker']} / {analysis['price']} / 점수: {analysis['score']} ({analysis['grade']})
-[지표] {analysis['trend']} / RSI: {analysis['rsi']} / {analysis['whale']} / {analysis['squeeze']}
-[전략] 타겟: {analysis['target']} / 손절: {analysis['cut']}
-[실적] {analysis['earnings']} ({analysis['earnings_dday']})
-[AI 리포트 요약] {analysis['report']}
+                    context = f"[종목] {analysis['ticker']} (${analysis['price']}) / [점수] {analysis['score']}\n[분석] {analysis['report']}\n[질문] {q}"
+                    content = f"{context}\n\n위 내용을 바탕으로 답변해. (한국 주식 고수 말투, 반말)"
+                else:
+                    today = datetime.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
+                    content = f"""
+[Context] 오늘은 {today}이다. 사용자가 주식 종목을 추천해달라고 하거나 시장 상황을 묻는다.
+[Mission]
+1. 현재 미국 시장에서 가장 핫한 섹터와 종목 3개를 찾아 추천해라. (웹 검색)
+2. 이유를 명확히 설명해라 (거래량, 호재, 뉴스 등).
+3. 한국 주식 은어 사용 (떡상, 줍줍 등). '투자 책임' 언급 금지.
 [질문] {q}
 """
-                    content = f"{context}\n\n위 정보를 바탕으로 답변해. (한국 주식 고수 말투, 반말, 짧고 명확하게)"
-                else:
-                    content = f"질문: {q} (한국 주식투자자 관점, 짧게 답변)"
-
-                res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":content}],"temperature":0.3}, headers=h, timeout=15).json()
+                res = requests.post(url, json={"model":"sonar","messages":[{"role":"user","content":content}],"temperature":0.5}, headers=h, timeout=20).json()
                 st.write(res['choices'][0]['message']['content'])
-            except: st.error("채팅 오류")
+            except Exception as e:
+                st.error(f"채팅 오류: {e}")
