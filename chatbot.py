@@ -63,8 +63,16 @@ st.markdown(f"""
         text-shadow: 0 0 20px rgba(255, 71, 87, 0.3);
     }}
     .grade-badge {{
-        font-size: 1.5rem; font-weight: bold; padding: 5px 15px;
-        border-radius: 5px; display: inline-block; margin-bottom: 20px;
+        font-size: 1.5rem; font-weight: bold; padding: 10px 20px;
+        border-radius: 8px; display: inline-block; margin-bottom: 20px;
+        background-color: rgba(20, 20, 20, 0.8);
+        border: 1px solid currentColor;
+        box-shadow: 0 0 10px currentColor, inset 0 0 5px currentColor;
+        transition: all 0.3s ease;
+    }}
+    .grade-badge:hover {{
+        transform: scale(1.05);
+        box-shadow: 0 0 30px currentColor, inset 0 0 15px currentColor;
     }}
 
     /* 네온 카드 (박스 자체가 빛나는 효과) */
@@ -85,10 +93,7 @@ st.markdown(f"""
 
     /* 카드 설명 텍스트 */
     .neon-desc {{
-        font-size: 0.75rem; color: #aaa; margin-top: 8px;
-        opacity: 0.6; transition: all 0.3s ease;
-    }}
-    .neon-card:hover .neon-desc {{
+        font-size: 0.75rem; margin-top: 8px;
         opacity: 1; color: currentColor;
     }}
 
