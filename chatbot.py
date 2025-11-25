@@ -125,12 +125,15 @@ def get_ai_score(row):
     # 추세
     if row['close'] > row['SMA20']: score += 15
     else: score -= 10
-    # 모멘텀
+    
+    # 모멘텀 (주석 에러 수정 완료)
     if 50 <= row['RSI'] <= 70: score += 15
-    elif row['RSI'] > 75: score -= 5 (과매수)
-    elif row['RSI'] < 30: score += 20 (과매도 반등)
+    elif row['RSI'] > 75: score -= 5 # 과매수 감점
+    elif row['RSI'] < 30: score += 20 # 과매도 반등 기대
+    
     # 에너지
     if row['MACD'] > row['Signal']: score += 15
+    
     # 수급
     vol_ratio = row['volume'] / row['VolAvg20']
     if vol_ratio > 3.0: score += 20
