@@ -307,20 +307,50 @@ def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings
 # ==========================================
 st.markdown(f"<div class='macro-bar'>{get_macro_ticker()}</div>", unsafe_allow_html=True)
 
-# Session State 초기화 (분석 상태 관리)
+# Session State 초기화 (분석 상태 관리 + 히스토리)
 if 'is_running' not in st.session_state:
     st.session_state.is_running = False
+if 'ticker_history' not in st.session_state:
+    st.session_state.ticker_history = []
+if 'selected_ticker' not in st.session_state:
+    st.session_state.selected_ticker = "IONQ"
 
 def toggle_analysis():
     st.session_state.is_running = not st.session_state.is_running
 
+def add_to_history(ticker):
+    """히스토리에 티커 추가 (중복 제거, 최신순 유지)"""
+    if ticker and ticker not in st.session_state.ticker_history:
+        st.session_state.ticker_history.insert(0, ticker)
+        # 최대 10개까지만 유지
+        st.session_state.ticker_history = st.session_state.ticker_history[:10]
+    elif ticker in st.session_state.ticker_history:
+        # 이미 있으면 최상단으로 이동
+        st.session_state.ticker_history.remove(ticker)
+        st.session_state.ticker_history.insert(0, ticker)
+
+def select_ticker(t):
+    """히스토리에서 티커 선택"""
+    st.session_state.selected_ticker = t
+    st.session_state.is_running = True
+
 c1, c2 = st.columns([3, 1])
-ticker = c1.text_input("TICKER", value="IONQ", label_visibility="collapsed").upper().strip()
+ticker = c1.text_input("TICKER", value=st.session_state.selected_ticker, label_visibility="collapsed").upper().strip()
 
 # 버튼 라벨 및 콜백 설정
 btn_label = "🛑 분석 중단" if st.session_state.is_running else "🔥 분석 시작"
 # 버튼을 누르면 toggle_analysis 함수가 실행되어 상태가 반전됨
 c2.button(btn_label, on_click=toggle_analysis)
+
+# 최근 검색 티커 히스토리 표시
+if st.session_state.ticker_history:
+    st.markdown("<div style='margin-top: -10px; margin-bottom: 10px;'><span style='font-size: 0.7rem; color: #888;'>최근 검색:</span></div>", unsafe_allow_html=True)
+    cols = st.columns(min(len(st.session_state.ticker_history), 5))
+    for idx, hist_ticker in enumerate(st.session_state.ticker_history[:5]):
+        with cols[idx]:
+            if st.button(f"📊 {hist_ticker}", key=f"hist_{hist_ticker}", use_container_width=True):
+                select_ticker(hist_ticker)
+                st.rerun()
 
 # 상태가 True일 때만 분석 실행
 if st.session_state.is_running:
@@ -335,10 +365,13 @@ if st.session_state.is_running:
                 st.error("데이터를 찾을 수 없습니다. 티커를 확인해주세요.")
                 st.session_state.is_running = False # 데이터 없으면 중단
             else:
+                # 데이터 로드 성공 시 히스토리에 추가
+                add_to_history(ticker)
+
                 df = pd.DataFrame(aggs)
                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
                 df = df.rename(columns={'open':'open','high':'high','low':'low','close':'close','volume':'volume'})
-                
+
                 df = calculate_quant_metrics(df)
                 if len(df) < 20:
                     st.error("데이터 부족")
