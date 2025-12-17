@@ -315,7 +315,7 @@ def toggle_analysis():
     st.session_state.is_running = not st.session_state.is_running
 
 c1, c2 = st.columns([3, 1])
-ticker = c1.text_input("TICKER", value="IONQ", label_visibility="collapsed").upper().strip()
+ticker = c1.text_input("TICKER", value="RKLB", label_visibility="collapsed").upper().strip()
 
 # 버튼 라벨 및 콜백 설정
 btn_label = "🛑 분석 중단" if st.session_state.is_running else "🔥 분석 시작"
