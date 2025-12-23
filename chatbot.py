@@ -173,14 +173,56 @@ def get_earnings_schedule(ticker):
     return {"d_day": "-", "date": "TBD", "diff": 99}
 
 def run_deep_analysis(ticker, price, score, indicators, news_data, fda, earnings, fundamental):
-    # 재무 정보 요약 추가
-    fund_text = f"매출성장: {fundamental['revenue_growth']*100:.1f}%" if fundamental else "재무데이터 없음"
-    prompt = f"[TARGET] {ticker} (${price}) [SCORE] {score} [FUND] {fund_text} [SIGNAL] {indicators['whale']} 한국 주식 고수 말투로 뉴스 요약 및 대응 전략을 3줄로 작성해줘."
-    try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        return model.generate_content(prompt).text
-    except: return "AI 분석 중..."
+    """
+    AI 심층 분석 함수 (Perplexity AI 활용 - 실시간 뉴스 검색 최적화)
+    """
+    # 재무 정보 텍스트 정리
+    fund_text = f"매출성장: {fundamental['revenue_growth']*100:.1f}%, 이익률: {fundamental['profit_margin']*100:.1f}%" if fundamental else "재무 데이터 없음"
+    
+    # AI에게 전달할 프롬프트 (Perplexity는 최신 뉴스를 검색해서 알려줍니다)
+    prompt = f"""
+    [ROLE] 한국 주식 시장의 냉철한 퀀트 분석가
+    [TARGET] 종목: {ticker}, 현재가: ${price}
+    [DATA] 퀀트점수: {score}/100, 수급: {indicators['whale']}, 재무: {fund_text}
+    [MISSION]
+    1. 해당 종목의 최신 뉴스 및 주가 영향이 큰 재료를 실시간 검색하여 분석하라.
+    2. 한국 주식 고수의 말투(예: "수급이 꼬였네요", "재료가 살아있습니다")를 사용하라.
+    3. 아래 형식으로 딱 3줄 요약하라.
+    
+    ## ⚡ 실시간 뉴스 & 재료 체크
+    - (뉴스와 재료 요약)
+    ## 🏛️ 최종 대응 전략
+    - (매수/보유/관망 의견 및 이유)
+    """
 
+    url = "https://api.perplexity.ai/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        # 타임아웃을 20초로 설정하여 너무 오래 기다리지 않게 함
+        response = requests.post(
+            url, 
+            json={
+                "model": "sonar", # 실시간 검색 기능이 있는 모델
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3
+            }, 
+            headers=headers, 
+            timeout=25 
+        )
+        
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            return f"⚠️ AI 분석 오류 (Status: {response.status_code}): API 키나 할당량을 확인하세요."
+            
+    except Exception as e:
+        # 이 부분이 "AI 분석 중..."으로 되어 있으면 멈춘 것처럼 보입니다.
+        # 실제 에러 내용을 출력하도록 수정했습니다.
+        return f"❌ AI 분석 연결 실패: {str(e)}"
 # ==========================================
 # [4] 메인 로직
 # ==========================================
