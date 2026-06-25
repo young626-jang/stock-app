@@ -155,6 +155,7 @@ try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
     TAVILY_API_KEY = st.secrets["TAVILY_API_KEY"]
+    FINNHUB_API_KEY = st.secrets.get("FINNHUB_API_KEY", "")
     FDA_API_KEY = st.secrets.get("FDA_API_KEY", "")
 except Exception:
     st.error("🚨 `.streamlit/secrets.toml` 파일 또는 API 키를 확인해주세요.")
@@ -316,11 +317,26 @@ def parse_date_from_text(text):
 
 @st.cache_data(ttl=3600)
 def get_earnings_schedule(ticker):
+    # 1차: Finnhub 공식 실적 캘린더 (정확) → 오늘 이후 가장 가까운 예정일
+    if FINNHUB_API_KEY:
+        try:
+            today = datetime.now().date()
+            r = requests.get("https://finnhub.io/api/v1/calendar/earnings", params={
+                "symbol": ticker,
+                "from": today.strftime("%Y-%m-%d"),
+                "to": (today + timedelta(days=180)).strftime("%Y-%m-%d"),
+                "token": FINNHUB_API_KEY
+            }, timeout=8)
+            cal = r.json().get("earningsCalendar", [])
+            # 오늘 이후(>=) 날짜 중 가장 빠른 것
+            future = sorted(e["date"] for e in cal if e.get("date") and e["date"] >= today.strftime("%Y-%m-%d"))
+            if future:
+                return calc_d_day(datetime.strptime(future[0], "%Y-%m-%d").date())
+        except Exception: pass
+    # 2차(폴백): Tavily 웹검색
     try:
-        # Tavily 실시간 검색으로 다음 실적 발표일 조회
         res = tavily_search(f"{ticker} stock next earnings date", want_answer=True, max_results=3)
-        text = res["answer"] + "\n" + res["snippets"]
-        d = parse_date_from_text(text)
+        d = parse_date_from_text(res["answer"] + "\n" + res["snippets"])
         if d:
             return calc_d_day(d)
     except Exception: pass
